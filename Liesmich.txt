@@ -1,0 +1,353 @@
+SYNC PILOT 1
+============
+
+Ordner abgleichen, sichern und spiegeln.
+Aktuelle Version: siehe Info-Fenster (Klick auf die Versionsnummer) bzw.
+Eigenschaften > Details der EXE.
+
+Versionen:
+  1.24.2026.1105 Erste Vorabversion auf GitHub; Updates finden auch
+                 Vorabversionen; Versionsplakette kleiner und näher am Namen;
+                 behoben: abgeschnittene Texte bei "Speichern & analysieren",
+                 beim Filter "Konflikte & Übersprungen", in den Beschreibungen
+                 der Optionen und im Hinweis zu den Ordnerangaben; Verlauf und
+                 Analyse ohne waagrechte Bildlaufleiste, lange Fehlermeldungen
+                 im Verlauf werden mit "…" gekürzt; im dunklen Modus keine
+                 Spaltenlinien mehr unter der letzten Zeile
+  1.9.2026.1105  Zeitplan wie bei Easy2Sync: mehrere feste Uhrzeiten mit
+                 Wochentagen oder alle x Minuten/Stunden, verpasste Termine
+                 nachholen, ohne Verbindung still auslassen; Starten bei
+                 Ereignissen: Änderungen in Ordner A/B, Trigger-Datei,
+                 Ordner/Computer/Laufwerk wird verfügbar; Verknüpfung auf dem
+                 Desktop oder in einem Ordner; Menü einer Aufgabe per
+                 Rechtsklick (ohne Knopf "..."), Aufgabenliste kompakter;
+                 Protokolle werden nach 30 Tagen gelöscht (einstellbar),
+                 automatische Läufe ohne Änderungen schreiben kein Protokoll;
+                 ist der gespeicherte Stand beschädigt oder fehlt er, kommen
+                 gelöschte Dateien nicht zurück: Sync Pilot fragt nach
+                 (Sicherung des Stands als .bak, Strg+A in der Analyse);
+                 Updates über GitHub: Prüfung beim Start, Hinweis mit
+                 "Jetzt aktualisieren" (Info-Fenster > Updates);
+                 Auswahlfelder im Windows-11-Stil; Daten jetzt unter
+                 %LOCALAPPDATA%\Sync Pilot (werden beim ersten Start aus
+                 %APPDATA% übernommen); Kopf mit Icon, Versionsplakette und
+                 kurzer Erklärung; Einstellungen werden erst mit "Speichern"
+                 übernommen, "Abbrechen" verwirft sie; Handy-Seite: Tippen auf
+                 die Version zeigt die Info mit Logo und Copyright (Fußzeile
+                 entfällt)
+  1.8.2026.1105  Umbenannte und verschobene Ordner und Dateien werden auf der
+                 anderen Seite umbenannt statt neu kopiert; Dateigröße als
+                 Filter; Aufgaben deaktivieren; "..." an den Filterlisten zum
+                 Auswählen aus Ordner A/B; Navigation ein- und ausklappbar mit
+                 Anpinnen
+  1.7.2026.1104  Filter wie bei Easy2Sync: Negativ- und Positivliste, je für
+                 Dateien und Ordner; nach dem Synchronisieren zeigt die Liste,
+                 was gemacht wurde (Erledigt bzw. Fehler); "Beenden" in der
+                 Navigation und Strg+Q; behoben: die Analyse startete beim
+                 Öffnen einer Aufgabe nicht ("Jetzt synchronisieren" blieb aus)
+  1.4.2026.1102  SFTP-Ziele (sftp://): eigene SSH-Verbindung mit Kennwort-
+                 Anmeldung, Server-Schlüssel wird beim ersten Mal bestätigt;
+                 Explorer-Kontextmenü (einschaltbar unter Einstellungen):
+                 Ordner A wählen, dann Ordner B, dann Richtung festlegen;
+                 Einstellungen für den Handy-Zugriff neu aufgebaut: QR-Code
+                 direkt sichtbar (meldet ohne Kennwort an, erneuert sich
+                 selbst), Adresse für das Handy, Zertifikat auch
+                 als .crt + .key, Prüfung und Freigabe der Windows-Firewall,
+                 http wird auf https umgeleitet, IPv6; Schalter "Zugriff aus
+                 dem Internet" (aus = nur Heimnetz und VPN), Sperre je Adresse
+                 nach 5 Fehlversuchen (10 Minuten) und für alle Zugriffe von
+                 außen nach 15 Fehlversuchen in einer Stunde (1 Stunde); ein
+                 belegter Port wird gemeldet
+  1.3.2026.1102  Fenster startet größer; Geräte-Icons je Ordner; Anmeldung für
+                 Netzwerkfreigaben; Platzhalter %VARIABLE% und
+                 %DRIVELETTER:Name%; FTP-Ziele (ftp://, ftps://, ftpsim://);
+                 Zeitpläne folgen dem Programm, wenn es verschoben wird;
+                 Handy-Zugriff über eine eingebaute Webseite mit Kennwort,
+                 Koppeln per QR-Code und HTTPS mit eigenem Zertifikat;
+                 Hintergrundbetrieb im Infobereich, Start mit Windows, Seite
+                 "Einstellungen"; nur eine Oberfläche gleichzeitig
+  1.2.2026.1101  Programm-Icon im Kopf zeigte Pixelrauschen: Icon-Datei neu
+                 erzeugt (kleine Größen als BMP, 256 als PNG)
+  1.1.2026.1101  Screenshots für GitHub aus Beispieldaten ("Sync Pilot.exe"
+                 --screenshots, hell und dunkel, nach Screenshots); die
+                 Erstellen.bat fragt nach (ohne Antwort nach 10 Sekunden Nein,
+                 bei /nopause nie); keine Warnungen mehr beim Erstellen
+  1.0.2026.1101  Erste Version: Aufgaben mit Ordnerpaaren, Analyse mit Vorschau,
+                 Abgleichen / Sichern / Spiegeln, Lösch-Erkennung, Konflikte,
+                 Filter und Optionen, Zeitplan, Protokolle und Verlauf
+
+Funktionen
+----------
+Aufgaben
+  Beliebig viele Ordnerpaare (A und B) mit Name, Richtung, Optionen und Zeitplan.
+  Rechtsklick auf eine Aufgabe (oder Kontextmenü-Taste): Bearbeiten, Duplizieren,
+  Aktivieren/Deaktivieren, Verknüpfung anlegen, Ordner öffnen, letztes
+  Protokoll öffnen, Löschen.
+
+Ordner angeben
+  D:\Daten\Fotos                    lokaler Ordner
+  \\Server\Freigabe\Ordner          Netzwerkfreigabe (UNC); bei Bedarf über
+                                    "Anmeldung" mit eigenem Benutzer und Kennwort
+  %USERPROFILE%\Dokumente           Windows-Variablen werden eingesetzt
+  %DRIVELETTER:MeinUsbStick%:\Sich  Laufwerk über seinen Namen, egal welchen
+                                    Buchstaben Windows ihm gibt
+  ftp://server.de/pfad              FTP (unverschlüsselt)
+  ftps://server.de:21/pfad          FTPS mit explizitem TLS (AUTH TLS)
+  ftpsim://server.de:990/pfad       FTPS mit implizitem TLS
+  sftp://server.de:22/pfad          SFTP (über SSH)
+  Der Pfad gilt ab dem Startordner nach der Anmeldung (wie bei den meisten
+  FTP-Programmen); mit zwei Schrägstrichen (ftp://server.de//var/www) ab der
+  Wurzel des Servers. Benutzer und Kennwort stehen unter "Anmeldung". Auf
+  FTP-Servern wird endgültig gelöscht (kein Papierkorb). Server mit MLSD
+  liefern sekundengenaue Zeiten; ältere Server ohne MLSD nur grobe Zeiten -
+  dort gilt beim ersten Abgleich gleiche Größe als gleich.
+  SFTP: Benutzer und Kennwort unter "Anmeldung" eintragen und einmal
+  "Verbindung prüfen" klicken - dabei wird der Schlüssel des Servers
+  (Fingerabdruck SHA256:...) bestätigt und gespeichert. Ändert er sich später,
+  bricht Sync Pilot mit einer Warnung ab. Der Pfad gilt wie bei FTP ab dem
+  Startordner, mit // davor ab der Wurzel (sftp://nas//volume1/backup).
+  Unterstützt: Schlüsseltausch curve25519 bzw. Diffie-Hellman (Gruppe 14/16),
+  Server-Schlüssel Ed25519, ECDSA und RSA, AES-CTR mit HMAC-SHA2 (auch ETM),
+  Anmeldung mit Kennwort bzw. keyboard-interactive. Anmeldung mit
+  Schlüsseldatei folgt bei Bedarf. Auf SFTP-Servern wird endgültig gelöscht.
+  Links neben jedem Ordner wählt man ein Geräte-Icon (oder "Automatisch").
+  Das Kennwort wird mit Windows-Bordmitteln verschlüsselt gespeichert und ist
+  nur mit dem eigenen Windows-Konto auf diesem Rechner lesbar.
+
+Richtungen
+  Abgleichen (A <-> B)  Änderungen in beide Richtungen. Löschungen werden über den
+                        gespeicherten Stand des letzten Laufs erkannt.
+  Sichern (A -> B)      Neue und geänderte Dateien nach B. Löschungen nur, wenn
+                        "Löschungen übernehmen" eingeschaltet ist.
+  Spiegeln (A -> B)     B wird exakt wie A.
+
+Analyse und Vorschau
+  Vor dem Abgleich zeigt die Analyse jede geplante Aktion. Filter: Nach B,
+  Nach A, Löschen, Konflikte. Per Rechtsklick lässt sich jede Aktion ändern
+  oder überspringen. Wurde eine Datei auf beiden Seiten geändert, wird sie nie
+  automatisch überschrieben, sondern als Konflikt angezeigt.
+
+Optionen
+  Löschungen übernehmen, In den Papierkorb, Versteckte Dateien,
+  Inhalt vergleichen (bei gleicher Größe, aber anderem Datum).
+
+Filter (ein Muster pro Zeile, wie bei Easy2Sync)
+  Nicht abgleichen (Negativliste), getrennt für Dateien und Ordner:
+    Thumbs.db, *.tmp     Dateiname (* und ? als Platzhalter)
+    .well-known          Ordner mit diesem Namen, egal wo
+    \writable\cache      fester Pfad ab dem Startordner der Aufgabe
+  Nur diese abgleichen (Positivliste): Leer = alles. Sonst werden NUR passende
+  Dateien bzw. Ordner (mit allem darin) abgeglichen; alles andere bleibt auf
+  beiden Seiten unberührt.
+  Der Knopf "..." über jeder Liste übernimmt Namen bzw. Name + Pfad per
+  Auswahl aus Ordner A oder B (nur bei Windows-Ordnern, nicht bei FTP/SFTP).
+  Dateigröße: Dateien kleiner bzw. größer als eine Grenze (z. B. 500 KB,
+  2 MB) nicht abgleichen. Passt eine Datei auf einer Seite nicht, bleibt sie
+  auf beiden Seiten unberührt.
+  Ältere Aufgaben werden beim Öffnen automatisch auf die getrennten Listen
+  umgestellt.
+
+Umbenennen und Verschieben
+  Wird auf einer Seite ein Ordner oder eine Datei umbenannt bzw. verschoben,
+  zieht Sync Pilot das auf der anderen Seite nach, statt alles zu löschen und
+  neu zu kopieren ("Ordner umbenennen in B" bzw. "Umbenennen in B"). Erkannt
+  wird das am Inhalt: gleiche Dateien mit gleicher Größe und Zeit (bei
+  Ordnern der ganze Inhalt; mit "Inhalt vergleichen" auch am Inhalt). Nur
+  eindeutige Fälle; sonst wie bisher löschen und kopieren. Rechtsklick >
+  "Überspringen" lässt die Umbenennung für diesen Lauf aus. Voraussetzung ist ein früherer Abgleich (gespeicherter
+  Stand), außer beim Spiegeln.
+
+Aufgabe deaktivieren
+  In der Aufgabe "Aufgabe aktiv" ausschalten oder per Rechtsklick auf die
+  Aufgabe "Deaktivieren". Sie läuft dann nicht nach Zeitplan und nicht bei "Alle
+  synchronisieren"; Analysieren geht weiter.
+
+Zeitplan (läuft auch, wenn Sync Pilot geschlossen ist)
+  Zu festen Uhrzeiten (beliebig viele, je mit Wochentagen, z. B. "Mo–Fr 12:00"
+  und "Täglich 23:10"), alle x Minuten/Stunden oder bei der Windows-Anmeldung.
+  Läuft über die Windows-Aufgabenplanung (Ordner "Sync Pilot") bzw. den
+  Autostart, ohne Fenster; Konflikte werden dabei übersprungen.
+  Verpassten Termin nachholen: war der PC zur geplanten Zeit aus, läuft die
+  Aufgabe, sobald er wieder an ist.
+  Ohne Verbindung still auslassen: fehlt das Laufwerk, die Freigabe oder der
+  Server, fällt ein automatischer Lauf ohne Fehlermeldung aus (gilt auch für
+  die Ereignisse unten). Ein fehlender Ordner selbst bleibt ein Fehler.
+  Ältere Zeitpläne ("Täglich um", "Stündlich") werden beim ersten Start
+  automatisch übernommen.
+  Wird die EXE verschoben, stellt Sync Pilot die Zeitpläne beim nächsten
+  Start selbst auf den neuen Ort um (einmal das Programm öffnen genügt).
+
+Bei Ereignissen starten (solange Sync Pilot läuft, auch nur im Infobereich)
+  Änderungen im Ordner: Ordner A und/oder B überwachen; gestartet wird, wenn
+  so viele Sekunden lang nichts mehr geändert wurde (z. B. 1800). Nicht für
+  FTP/SFTP; bei Netzwerkfreigaben weniger zuverlässig als bei lokalen Ordnern.
+  Trigger-Datei: existiert die Datei, wird sie gelöscht und die Aufgabe
+  gestartet (z. B. von einem anderen PC aus angelegt).
+  Wenn etwas verfügbar wird: Ordner (z. B. \\Laptop\Freigabe), Computername
+  oder IP, Laufwerksname (z. B. MeinUsbStick). Geprüft wird alle x Sekunden,
+  gestartet nach der eingestellten Wartezeit. Ist es beim Programmstart schon
+  da, läuft die Aufgabe einmal.
+  Beim Speichern bietet Sync Pilot an, mit Windows zu starten und im
+  Infobereich weiterzulaufen. Fehler meldet ein Hinweis am Infobereich.
+
+Verknüpfung
+  Rechtsklick auf eine Aufgabe > Verknüpfung anlegen > Auf dem Desktop bzw. In
+  einem anderen Ordner. Ein Doppelklick öffnet Sync Pilot, analysiert und
+  synchronisiert (bei Konflikten wartet die Vorschau).
+
+Sicherheitsnetz
+  - Fehlt Ordner A oder B (z. B. USB-Stick nicht angesteckt), bricht der Lauf ab.
+  - Bei auffällig vielen Löschungen (mehr als 30 % und mindestens 20 Dateien,
+    oder eine Seite ist leer) fragt das Programm nach; geplante Läufe brechen ab.
+  - Was auf einer Seite nicht lesbar oder versteckt ist, gilt nie als gelöscht.
+  - Auf Netzlaufwerken gibt es keinen Papierkorb; dort wird endgültig gelöscht
+    (steht im Protokoll).
+  - Gespeicherter Stand beschädigt: Sync Pilot nimmt die Sicherung vom
+    vorletzten Lauf (Status\<ID>.state.bak). Fehlen beide oder sind beide
+    beschädigt, obwohl die Aufgabe schon synchronisiert wurde, werden Dateien
+    und Ordner, die nur auf einer Seite liegen, beim Abgleichen nicht kopiert,
+    sondern als Frage gezeigt ("Stand fehlt: neu in A oder in B gelöscht?") –
+    sonst kämen gelöschte Dateien zurück. Auswählen (Strg+A für alle) und per
+    Rechtsklick "Nach B kopieren" oder "In A löschen". Automatische Läufe
+    überspringen diese Einträge, bis entschieden ist; Offenes wird gemerkt.
+
+Updates
+  Sync Pilot fragt die neueste Version auf GitHub ab
+  (github.com/WestMc002/Sync-Pilot, Releases). Dabei wird nur die
+  öffentliche Release-Liste gelesen; es werden keine Daten übertragen und
+  keine Anmeldung gebraucht.
+  - Kurz nach dem Start wird still geprüft, höchstens einmal täglich (auch
+    wenn Sync Pilot nur im Infobereich läuft). Abschaltbar im Info-Fenster
+    (Klick auf die Versionsnummer): Schalter "Automatisch prüfen".
+  - Im Info-Fenster zeigt die Zeile "Updates" den Stand mit Symbol (Aktuell,
+    Version x verfügbar, Prüfung nicht möglich, Noch nicht geprüft) und
+    darunter, wann zuletzt geprüft wurde. Der Knopf rechts heißt "Jetzt
+    prüfen", bei einer neuen Version "Aktualisieren" (bzw. "Release-Seite"
+    im Projektordner). Das Ergebnis einer Prüfung von Hand steht nur dort.
+  - Gibt es eine neuere Version, erscheint oben im Fenster ein Hinweis:
+    "Jetzt aktualisieren" lädt das ZIP, beendet Sync Pilot, ersetzt EXE und
+    Liesmich und startet das Programm neu. Aufgaben, Einstellungen, Stand und
+    Verlauf (%LOCALAPPDATA%\Sync Pilot) bleiben erhalten. Läuft gerade ein
+    Abgleich nach Zeitplan, wartet das Update, bis er fertig ist. Schlägt das
+    Ersetzen fehl, bleibt die bisherige Version und Sync Pilot meldet es.
+    "Release-Seite" öffnet die Seite im Browser, "Später" blendet den Hinweis
+    bis zur nächsten Prüfung aus. Das Fenster wird dabei um die Leiste
+    größer, soweit der Bildschirm reicht.
+  - Im Infobereich: einmal je Version und Programmstart ein Hinweis (Klick
+    startet das Update) und oben im Menü fett "Update auf ... installieren".
+    Läuft Sync Pilot tagelang, sieht es alle 6 Stunden nach, ob die Prüfung
+    fällig ist.
+  - Liegt der Programmordner unter "Programme" o. ä. ohne Schreibrechte,
+    fragt Windows beim Aktualisieren nach Administratorrechten.
+  - Im Projektordner (mit Erstellen.bat) wird nie ersetzt, weil dort die EXE
+    beim Erstellen entsteht; "Jetzt aktualisieren" öffnet dann die
+    Release-Seite.
+  - Download und Hilfsskript liegen im Temp-Ordner unter "Sync Pilot-Update".
+
+Explorer-Kontextmenü (Seite "Einstellungen" > Explorer)
+  1. Rechtsklick auf Ordner A > Sync Pilot > Als Ordner A wählen
+     (unten rechts erscheint kurz ein Hinweis)
+  2. Rechtsklick auf Ordner B > Sync Pilot > Mit "A" abgleichen ...
+  3. Richtung wählen (Abgleichen, Sichern, Spiegeln; "Tauschen" vertauscht A
+     und B), dann "Analysieren" - kopiert wird erst nach "Synchronisieren" in
+     der Vorschau. "Weitere Optionen ..." öffnet die neue Aufgabe mit Filtern
+     und Zeitplan. Gibt es für die beiden Ordner schon eine Aufgabe, bietet
+     Sync Pilot an, diese zu analysieren.
+  Funktioniert auf Ordnern, Laufwerken und im leeren Bereich eines Ordners.
+  Unter Windows 11 steht der Eintrag unter "Weitere Optionen anzeigen"
+  (bzw. Umschalt+F10). Vor dem Löschen des Programms den Schalter ausschalten,
+  sonst bleibt der Eintrag im Menü stehen.
+
+Navigation
+  Links oben ☰ klappt die Navigation ein (nur Symbole) bzw. aus. Mit der
+  Stecknadel bleibt sie ausgeklappt (angepinnt); sonst klappt sie über dem
+  Inhalt auf und nach der Auswahl wieder zu.
+
+Hintergrund und Handy-Zugriff (Seite "Einstellungen")
+  Änderungen werden erst mit "Speichern" (rechts unter den Karten, Enter)
+  übernommen; "Abbrechen" (Esc) oder der Wechsel zu einer anderen Seite
+  verwirft sie. Fehler stehen rot links neben den Knöpfen, nach dem
+  Speichern geht es zurück zu den Aufgaben mit einer kurzen Meldung. Der Webserver startet dabei nur neu, wenn nötig (Ein/Aus, Port, HTTPS,
+  Zertifikat). Auch ein neues Kennwort und "Alle Handys abmelden" gelten
+  erst beim Speichern.
+  Im Infobereich weiterlaufen  Beim Schließen des Fensters läuft Sync Pilot
+                               unten rechts weiter. Komplett beenden: links
+                               unten "Beenden", Strg+Q oder Rechtsklick auf
+                               das Symbol > Beenden.
+  Mit Windows starten          Startet nach der Anmeldung unsichtbar im
+                               Infobereich ("Sync Pilot.exe" /tray).
+  Steuerung per Handy          Eigener kleiner Webserver (Standard-Port 8090,
+                               IPv4 und IPv6). "Adresse für das Handy":
+                               Rechnername, IP oder Domain/DynDNS-Name (wie im
+                               Zertifikat), leer = automatisch. Kennwort mit
+                               mindestens 8 Zeichen (bei Zugriff aus dem
+                               Internet 12), zweimal eingeben.
+  Verschlüsselung (HTTPS)      Zertifikatsdatei (.crt/.pem/.cer mit privatem
+                               Schlüssel .key/.pem, oder .pfx/.p12 mit
+                               Kennwort) oder Windows-Zertifikatspeicher (nach
+                               Domain, immer das neueste gültige; durchsucht
+                               werden Benutzer, Computer und der Speicher
+                               "Webhosting" von win-acme). Mit
+                               "Prüfen und übernehmen" testen (übernommen
+                               wird erst mit "Speichern"). Erneuerte
+                               Dateien (z. B. Let's Encrypt) werden nach
+                               spätestens 30 Sekunden übernommen. Anfragen über
+                               http:// werden auf https:// umgeleitet.
+  Zugriff aus dem Internet     Nur mit Portweiterleitung im Router nötig, nur
+                               mit HTTPS und einem Kennwort ab 12 Zeichen. Aus:
+                               Die Seite nimmt nur Verbindungen aus dem
+                               Heimnetz und per VPN an (private Adressen,
+                               100.64.x.x, IPv6 fc00::/7 und fe80::/10).
+  Schutz beim Anmelden: Nach 5 falschen Kennwörtern (oder QR-Codes) ist die
+  Adresse 10 Minuten gesperrt. Nach 15 Fehlversuchen von außen in einer Stunde,
+  egal von welcher Adresse, ist die Anmeldung aus dem Internet 1 Stunde
+  gesperrt; im Heimnetz geht es weiter.
+  Auf dem Handy öffnen: Der QR-Code steht direkt in den Einstellungen und
+  meldet das Handy ohne Kennwort an (Einmal-Code, gilt nur, solange er zu
+  sehen ist, höchstens 10 Minuten, wird von selbst erneuert); danach bleibt es 30 Tage angemeldet. Ohne Kamera den Link
+  öffnen und das Kennwort eingeben. Darunter: Status und Windows-Firewall mit
+  "Freigeben ..." (legt die Regel "Sync Pilot (Handy)" an, fragt nach
+  Administratorrechten). Tipp: "Zum Startbildschirm hinzufügen".
+
+Kommandozeile
+  "Sync Pilot.exe" /run <Name oder ID>
+  "Sync Pilot.exe" /runall
+  "Sync Pilot.exe" /sync <Name oder ID>         öffnen, analysieren, synchronisieren
+  "Sync Pilot.exe" /tray                        unsichtbar im Infobereich starten
+  "Sync Pilot.exe" /ordner-a "<Ordner>"         Ordner A merken (Explorer-Menü)
+  "Sync Pilot.exe" /ordner-b "<Ordner>"         Ordner B wählen, Richtung festlegen
+  "Sync Pilot.exe" /ordner-x                    gemerkten Ordner A vergessen
+  "Sync Pilot.exe" --screenshots [Zielordner]   Screenshots aus Beispieldaten
+                                                (Standard: Ordner Screenshots)
+  Rückgabewert: 0 = OK, 1 = Fehler oder Abbruch, 2 = Aufgabe nicht gefunden
+
+Daten
+  %LOCALAPPDATA%\Sync Pilot
+    aufgaben.xml   Aufgaben
+    einstellungen.xml  Hintergrund, Autostart, Explorer, Handy-Zugriff (Kennwort
+                   verschlüsselt, angemeldete Geräte nur als Prüfsumme)
+    verlauf.xml    Verlauf
+    Status\        Stand des letzten Laufs je Aufgabe (<ID>.state) und der
+                   vorletzte als Sicherung (<ID>.state.bak)
+    Protokolle\    ein Protokoll je Lauf; ältere als 30 Tage werden gelöscht
+                   (Einstellungen > Protokolle), automatische Läufe ohne
+                   Änderungen schreiben keins (der Verlauf genügt)
+  HKCU\Software\Sync Pilot\Explorer          gemerkter Ordner A
+  HKCU\Software\Classes\...\shell\SyncPilot  Kontextmenü (Ordner, Laufwerke,
+                                             Ordnerhintergrund)
+
+Erstellen
+  Erstellen.bat ausführen (csc.exe aus .NET Framework 4, in Windows enthalten).
+  Die Version zählt die Erstellen.bat automatisch hoch, die bisherige EXE und das
+  ganze Projekt werden unter Backup\Sync Pilot v<Version> gesichert.
+
+Projektaufbau
+  Quellcode   C#-Quelldateien (VersionInfo.cs erzeugt die Erstellen.bat)
+  Resources   Icon (SyncPilot.ico), GS-Logo.png, Beispieldaten für die
+              Screenshots (Demo.xml) und die Handy-Webseite (Web\), alles in
+              die EXE eingebettet
+  Design      Entwürfe (Icon-Vorschläge)
+  Screenshots Bilder für GitHub (von --screenshots erzeugt)
+  Backup      Sicherungen je Version
+
+Autor: Günther Schoder · www.westmc002.de

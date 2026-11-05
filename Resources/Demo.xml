@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Erfundene Beispieldaten nur für die Screenshots (Sync Pilot.exe mit Parameter screenshots) -->
+<Beispieldaten>
+  <Aufgaben>
+    <Aufgabe>
+      <Id>demo0000000000000000000000000001</Id>
+      <Name>Projekte ⇄ NAS</Name>
+      <FolderA>D:\Daten\Projekte</FolderA>
+      <FolderB>\\nas\Daten\Projekte</FolderB>
+      <Mode>Abgleichen</Mode>
+      <PropagateDeletes>true</PropagateDeletes>
+      <UseRecycleBin>true</UseRecycleBin>
+      <IncludeHidden>false</IncludeHidden>
+      <CompareContent>false</CompareContent>
+      <Excludes>
+        <string>Thumbs.db</string>
+        <string>desktop.ini</string>
+        <string>~$*</string>
+        <string>*.tmp</string>
+        <string>node_modules\</string>
+      </Excludes>
+      <Schedule>Taeglich</Schedule>
+      <ScheduleTime>22:00</ScheduleTime>
+    </Aufgabe>
+    <Aufgabe>
+      <Id>demo0000000000000000000000000002</Id>
+      <Name>Webseiten-Sicherung</Name>
+      <FolderA>C:\xampp\htdocs</FolderA>
+      <FolderB>E:\Backup\htdocs</FolderB>
+      <DeviceB>Festplatte</DeviceB>
+      <Mode>Sichern</Mode>
+      <PropagateDeletes>false</PropagateDeletes>
+      <UseRecycleBin>true</UseRecycleBin>
+      <Schedule>Stuendlich</Schedule>
+      <ScheduleTime>22:00</ScheduleTime>
+    </Aufgabe>
+    <Aufgabe>
+      <Id>demo0000000000000000000000000003</Id>
+      <Name>Dokumente → USB-Stick</Name>
+      <FolderA>C:\Users\Demo\Documents</FolderA>
+      <FolderB>%DRIVELETTER:USB-STICK%:\Dokumente</FolderB>
+      <DeviceB>USB</DeviceB>
+      <Mode>Spiegeln</Mode>
+      <PropagateDeletes>true</PropagateDeletes>
+      <UseRecycleBin>true</UseRecycleBin>
+      <Schedule>BeiAnmeldung</Schedule>
+      <ScheduleTime>22:00</ScheduleTime>
+    </Aufgabe>
+    <Aufgabe>
+      <Id>demo0000000000000000000000000004</Id>
+      <Name>Fotos ⇄ Laptop</Name>
+      <FolderA>D:\Bilder</FolderA>
+      <FolderB>\\laptop\Bilder</FolderB>
+      <DeviceB>Laptop</DeviceB>
+      <Mode>Abgleichen</Mode>
+      <PropagateDeletes>true</PropagateDeletes>
+      <UseRecycleBin>true</UseRecycleBin>
+      <Schedule>Manuell</Schedule>
+      <ScheduleTime>22:00</ScheduleTime>
+    </Aufgabe>
+    <Aufgabe>
+      <Id>demo0000000000000000000000000006</Id>
+      <Name>Homepage ⇄ Webserver</Name>
+      <FolderA>C:\xampp\htdocs\homepage</FolderA>
+      <FolderB>ftps://ftp.example.com/httpdocs</FolderB>
+      <DeviceB>Web</DeviceB>
+      <Mode>Abgleichen</Mode>
+      <PropagateDeletes>true</PropagateDeletes>
+      <UseRecycleBin>true</UseRecycleBin>
+      <UserB>webadmin</UserB>
+      <Schedule>Manuell</Schedule>
+      <ScheduleTime>22:00</ScheduleTime>
+    </Aufgabe>
+    <Aufgabe>
+      <Id>demo0000000000000000000000000005</Id>
+      <Name>Musik-Archiv</Name>
+      <FolderA>D:\Musik</FolderA>
+      <FolderB>\\nas\Archiv\Musik</FolderB>
+      <Mode>Sichern</Mode>
+      <PropagateDeletes>false</PropagateDeletes>
+      <UseRecycleBin>true</UseRecycleBin>
+      <Schedule>Manuell</Schedule>
+      <ScheduleTime>22:00</ScheduleTime>
+    </Aufgabe>
+  </Aufgaben>
+  <Verlauf>
+    <Lauf><Aufgabe>Projekte ⇄ NAS</Aufgabe><VorMinuten>4380</VorMinuten><Ergebnis>OK</Ergebnis><Kopiert>212</Kopiert><Geloescht>4</Geloescht><Konflikte>0</Konflikte><Fehler>0</Fehler><Sekunden>38.2</Sekunden><Geplant>true</Geplant></Lauf>
+    <Lauf><Aufgabe>Dokumente → USB-Stick</Aufgabe><VorMinuten>8700</VorMinuten><Ergebnis>Laufwerk „USB-STICK“ ist nicht angeschlossen.</Ergebnis><Kopiert>0</Kopiert><Geloescht>0</Geloescht><Konflikte>0</Konflikte><Fehler>1</Fehler><Sekunden>0.1</Sekunden><Geplant>true</Geplant></Lauf>
+    <Lauf><Aufgabe>Fotos ⇄ Laptop</Aufgabe><VorMinuten>190</VorMinuten><Ergebnis>OK</Ergebnis><Kopiert>57</Kopiert><Geloescht>0</Geloescht><Konflikte>0</Konflikte><Fehler>0</Fehler><Sekunden>21.7</Sekunden><Geplant>false</Geplant></Lauf>
+    <Lauf><Aufgabe>Webseiten-Sicherung</Aufgabe><VorMinuten>95</VorMinuten><Ergebnis>OK</Ergebnis><Kopiert>9</Kopiert><Geloescht>0</Geloescht><Konflikte>0</Konflikte><Fehler>0</Fehler><Sekunden>3.4</Sekunden><Geplant>true</Geplant></Lauf>
+    <Lauf><Aufgabe>Webseiten-Sicherung</Aufgabe><VorMinuten>35</VorMinuten><Ergebnis>OK, 2 Konflikte offen</Ergebnis><Kopiert>14</Kopiert><Geloescht>0</Geloescht><Konflikte>2</Konflikte><Fehler>0</Fehler><Sekunden>4.1</Sekunden><Geplant>true</Geplant></Lauf>
+    <Lauf><Aufgabe>Homepage ⇄ Webserver</Aufgabe><VorMinuten>48</VorMinuten><Ergebnis>OK</Ergebnis><Kopiert>6</Kopiert><Geloescht>1</Geloescht><Konflikte>0</Konflikte><Fehler>0</Fehler><Sekunden>8.9</Sekunden><Geplant>false</Geplant></Lauf>
+    <Lauf><Aufgabe>Projekte ⇄ NAS</Aufgabe><VorMinuten>12</VorMinuten><Ergebnis>OK</Ergebnis><Kopiert>23</Kopiert><Geloescht>2</Geloescht><Konflikte>0</Konflikte><Fehler>0</Fehler><Sekunden>12.6</Sekunden><Geplant>false</Geplant></Lauf>
+  </Verlauf>
+  <AnalyseAufgabe>Projekte ⇄ NAS</AnalyseAufgabe>
+  <DateienA>18452</DateienA>
+  <DateienB>18391</DateienB>
+  <BytesA>41875931136</BytesA>
+  <BytesB>41790029824</BytesB>
+  <Analyse>
+    <Eintrag><Pfad>Angebote\2026\Angebot-1042.pdf</Pfad><Aktion>NachB</Aktion><Grund>Neu in A</Grund><GroesseA>284211</GroesseA><AlterA>45</AlterA></Eintrag>
+    <Eintrag><Pfad>Angebote\2026\Angebot-1043.pdf</Pfad><Aktion>NachB</Aktion><Grund>Neu in A</Grund><GroesseA>301877</GroesseA><AlterA>20</AlterA></Eintrag>
+    <Eintrag><Pfad>Kunden\Beispiel GmbH</Pfad><Aktion>NachB</Aktion><Grund>Neuer Ordner in A</Grund><Ordner>true</Ordner></Eintrag>
+    <Eintrag><Pfad>Kunden\Beispiel GmbH\Vertrag.docx</Pfad><Aktion>NachB</Aktion><Grund>Neu in A</Grund><GroesseA>48230</GroesseA><AlterA>70</AlterA></Eintrag>
+    <Eintrag><Pfad>Webseite\css\style.css</Pfad><Aktion>NachB</Aktion><Grund>Geändert in A</Grund><GroesseA>18944</GroesseA><GroesseB>18710</GroesseB><AlterA>15</AlterA><AlterB>2900</AlterB></Eintrag>
+    <Eintrag><Pfad>Webseite\index.html</Pfad><Aktion>NachB</Aktion><Grund>Geändert in A</Grund><GroesseA>7310</GroesseA><GroesseB>7155</GroesseB><AlterA>16</AlterA><AlterB>2900</AlterB></Eintrag>
+    <Eintrag><Pfad>Buchhaltung\Rechnungen-2026.xlsx</Pfad><Aktion>NachA</Aktion><Grund>Geändert in B</Grund><GroesseA>96412</GroesseA><GroesseB>98810</GroesseB><AlterA>3000</AlterA><AlterB>130</AlterB></Eintrag>
+    <Eintrag><Pfad>Fotos\Messe\IMG_2041.jpg</Pfad><Aktion>NachA</Aktion><Grund>Neu in B</Grund><GroesseB>4718220</GroesseB><AlterB>200</AlterB></Eintrag>
+    <Eintrag><Pfad>Fotos\Messe\IMG_2042.jpg</Pfad><Aktion>NachA</Aktion><Grund>Neu in B</Grund><GroesseB>4520113</GroesseB><AlterB>199</AlterB></Eintrag>
+    <Eintrag><Pfad>Entwürfe\Logo-alt.png</Pfad><Aktion>LoeschenB</Aktion><Grund>In A gelöscht</Grund><GroesseB>152331</GroesseB><AlterB>9000</AlterB></Eintrag>
+    <Eintrag><Pfad>Notizen\Ideen.txt</Pfad><Aktion>Konflikt</Aktion><Grund>In A und B geändert</Grund><GroesseA>2210</GroesseA><GroesseB>2395</GroesseB><AlterA>60</AlterA><AlterB>55</AlterB></Eintrag>
+    <Eintrag><Pfad>Präsentation\Vortrag.pptx</Pfad><Aktion>Konflikt</Aktion><Grund>In A und B geändert</Grund><GroesseA>3301456</GroesseA><GroesseB>3298870</GroesseB><AlterA>300</AlterA><AlterB>280</AlterB></Eintrag>
+  </Analyse>
+</Beispieldaten>

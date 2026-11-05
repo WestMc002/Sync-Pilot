@@ -1,0 +1,20 @@
+# Gebaute Programme und Build-Ausgaben
+*.exe
+*.neu.exe
+Erstellen.log
+Quellcode/VersionInfo.cs
+
+# Sicherungen und Entwürfe
+Backup/
+Bin/
+Design/
+
+# Laufzeitdaten (Aufgaben, Stände und Protokolle liegen ohnehin unter %LOCALAPPDATA%)
+*.ini
+*.state
+*.state.bak
+Screenshots/Fehler.txt
+
+# Windows
+Thumbs.db
+desktop.ini

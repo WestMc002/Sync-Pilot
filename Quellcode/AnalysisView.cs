@@ -1,0 +1,625 @@
+// Sync Pilot – Analyse, Vorschau und Synchronisation einer Aufgabe
+// Copyright (C) 2026 Günther Schoder · https://www.westmc002.de
+// Lizenz: GNU General Public License v3.0 oder später (siehe LICENSE)
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Windows.Forms;
+
+namespace SyncPilot
+{
+    public class AnalysisView : BaseView
+    {
+        readonly SyncJob job;
+        readonly bool autoSync;
+        readonly FlatButton btnBack, btnRe, btnSync, btnClose, btnLog, btnCancel;
+        readonly Label title, status, sum1, sum2;
+        readonly Card summary, listCard;
+        readonly Panel pillBar, footer;
+        readonly Pill[] pills;
+        readonly ThemedListView list;
+        readonly ProgressBar progress;
+        readonly System.Windows.Forms.Timer timer;
+        readonly ContextMenuStrip menu;
+        readonly ToolStripMenuItem miToB, miToA, miDelA, miDelB, miSkip, miReset, miShowA, miShowB;
+
+        Analysis an;
+        string error;
+        List<PlanItem> view = new List<PlanItem>();
+        int filterIndex;
+        HistoryEntry lastRun;
+        string resultMsg;
+        /// <summary>Nach dem Synchronisieren: Liste zeigt, was gemacht wurde (bis "Neu analysieren").</summary>
+        bool showingResult;
+        bool resultBad;
+
+        volatile bool busy, cancel;
+        volatile string liveStatus = "";
+        volatile int progI, progN;
+
+        public override bool Busy { get { return busy; } }
+        public override void RequestCancel() { cancel = true; }
+
+        public AnalysisView(MainForm main, SyncJob job, bool autoSync) : base(main)
+        {
+            this.job = job;
+            this.autoSync = autoSync;
+
+            btnBack = new FlatButton("", Theme.GBack, BtnKind.Subtle);
+            btnBack.AccessibleName = "Zurück zu den Aufgaben";
+            btnBack.Click += delegate { Main.ShowTasks(); };
+            title = Ui.Label(job.Name, Theme.H1, Theme.Text, Theme.Bg);
+            status = Ui.WrapLabel("", Theme.Body, Theme.TextDim, Theme.Bg);
+            status.AutoEllipsis = true;
+            btnRe = new FlatButton("Neu analysieren", Theme.GRefresh, BtnKind.Secondary);
+            btnRe.Click += delegate { resultMsg = null; StartAnalysis(false); };
+
+            summary = new Card();
+            summary.Height = Theme.P(96);
+            summary.Paint += PaintSummary;
+
+            pillBar = new Panel();
+            pillBar.BackColor = Theme.Bg;
+            pillBar.Height = Theme.P(34);
+            string[] names = { "Alle", "→ Nach B", "← Nach A", "Löschen", "Konflikte & Übersprungen" };
+            pills = new Pill[names.Length];
+            for (int i = 0; i < names.Length; i++)
+            {
+                Pill p = new Pill(names[i]);
+                int idx = i;
+                p.CheckedChanged += delegate { if (p.Checked) { filterIndex = idx; ApplyFilter(); } };
+                pills[i] = p;
+                pillBar.Controls.Add(p);
+            }
+            listCard = new Card();
+            list = new ThemedListView();
+            list.VirtualMode = true;
+            list.Columns.Add("Aktion", Theme.P(150));
+            list.Columns.Add("Datei", Theme.P(380));
+            list.Columns.Add("Größe", Theme.P(90), HorizontalAlignment.Right);
+            list.Columns.Add("Geändert A", Theme.P(130));
+            list.Columns.Add("Geändert B", Theme.P(130));
+            list.Columns.Add("Grund", Theme.P(180));
+            list.FillColumn = 1;   // Datei bekommt die restliche Breite, keine waagrechte Bildlaufleiste
+            list.FillMin = 200;
+            list.RetrieveVirtualItem += OnRetrieve;
+            list.CustomDraw = DrawCell;
+            list.DoubleClick += delegate { ShowSelected(); };
+            listCard.Controls.Add(list);
+            listCard.Resize += delegate { list.SetBounds(1, Theme.P(6), listCard.Width - 2, listCard.Height - Theme.P(12)); };
+
+            ModernMenuBuilder mb = new ModernMenuBuilder(this);
+            menu = mb.CreateMenu();
+            miToB = mb.Item("Nach B kopieren", '\uE72A', delegate { Choose(ActionKind.NachB); });
+            miToA = mb.Item("Nach A kopieren", '\uE72B', delegate { Choose(ActionKind.NachA); });
+            miDelA = mb.Item("In A l\u00f6schen", '\uE74D', delegate { Choose(ActionKind.LoeschenA); });
+            miDelB = mb.Item("In B l\u00f6schen", '\uE74D', delegate { Choose(ActionKind.LoeschenB); });
+            miSkip = mb.Item("\u00dcberspringen", '\uE711', delegate { Choose(ActionKind.Keine); });
+            miReset = mb.Item("Vorschlag wiederherstellen", '\uE7A7', delegate { RestoreProposal(); });
+            miShowA = mb.Item("In Ordner A anzeigen", MenuHelper.Folder, delegate { Reveal(true); });
+            miShowB = mb.Item("In Ordner B anzeigen", MenuHelper.Folder, delegate { Reveal(false); });
+            menu.Items.AddRange(new ToolStripItem[] { miToB, miToA, miDelA, miDelB, miSkip, miReset, new ToolStripSeparator(), miShowA, miShowB });
+            menu.Opening += MenuOpening;
+            list.ContextMenuStrip = menu;
+            pills[0].Checked = true;
+
+            footer = new Panel();
+            footer.Dock = DockStyle.Bottom;
+            footer.Height = Theme.P(72);
+            footer.BackColor = Theme.Surface2;
+            footer.Paint += delegate (object s, PaintEventArgs e)
+            {
+                using (Pen p = new Pen(Theme.Border)) e.Graphics.DrawLine(p, 0, 0, footer.Width, 0);
+            };
+            sum1 = Ui.WrapLabel("", Theme.Bold, Theme.Text, Theme.Surface2);
+            sum2 = Ui.WrapLabel("", Theme.Small, Theme.TextDim, Theme.Surface2);
+            sum1.AutoEllipsis = true;
+            sum2.AutoEllipsis = true;
+            btnSync = new FlatButton("Jetzt synchronisieren", Theme.GSync, BtnKind.Primary);
+            btnSync.Click += delegate { StartSync(true); };
+            btnClose = new FlatButton("Zurück", null, BtnKind.Secondary);
+            btnClose.Click += delegate { Main.ShowTasks(); };
+            btnLog = new FlatButton("Protokoll öffnen", Theme.GDoc, BtnKind.Subtle);
+            btnLog.Visible = false;
+            btnLog.Click += delegate { if (lastRun != null) Ui.Open(lastRun.LogFile); };
+            btnCancel = new FlatButton("Abbrechen", Theme.GCancel, BtnKind.Secondary);
+            btnCancel.Click += delegate { cancel = true; btnCancel.Enabled = false; liveStatus = "Wird abgebrochen …"; };
+            progress = new ProgressBar();
+            progress.Height = Theme.P(6);
+            progress.Maximum = 1000;
+            footer.Controls.AddRange(new Control[] { sum1, sum2, btnSync, btnClose, btnLog, btnCancel, progress });
+            footer.Resize += delegate { LayoutFooter(); };
+
+            Controls.Add(footer);
+            Controls.AddRange(new Control[] { btnBack, title, status, btnRe, summary, pillBar, listCard });
+
+            timer = new System.Windows.Forms.Timer();
+            timer.Interval = 120;
+            timer.Tick += OnTick;
+            timer.Start();
+
+            // Analyse starten, sobald die Ansicht ein Fenster-Handle hat (auch wenn es schon besteht)
+            if (IsHandleCreated) BeginInvoke(new Action(Begin));
+            else HandleCreated += delegate { Begin(); };
+            UpdateUi();
+        }
+
+        bool begun;
+
+        void Begin()
+        {
+            if (begun || IsDisposed) return;
+            begun = true;
+            // Screenshots: Beispiel-Analyse statt echter Ordner
+            if (Demo.Active) AnalysisDone(Demo.CreateAnalysis(job), null, false);
+            else StartAnalysis(autoSync);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) { timer.Stop(); timer.Dispose(); }
+            base.Dispose(disposing);
+        }
+
+        // ---------- Layout ----------
+
+        protected override void OnLayout(LayoutEventArgs e)
+        {
+            base.OnLayout(e);
+            if (footer == null || listCard == null) return;
+            int pad = Theme.P(32), W = ClientSize.Width, H = ClientSize.Height - footer.Height;
+            btnBack.Location = new Point(pad - Theme.P(6), Theme.P(26));
+            title.Location = new Point(btnBack.Right + Theme.P(8), Theme.P(18));
+            btnRe.Location = new Point(W - pad - btnRe.Width, Theme.P(26));
+            status.SetBounds(btnBack.Right + Theme.P(10), title.Bottom, Math.Max(10, btnRe.Left - btnBack.Right - Theme.P(20)), Theme.P(22));
+
+            summary.SetBounds(pad, status.Bottom + Theme.P(14), W - 2 * pad, summary.Height);
+            pillBar.SetBounds(pad, summary.Bottom + Theme.P(14), W - 2 * pad, pillBar.Height);
+            int x = 0;
+            foreach (Pill p in pills)
+            {
+                p.Location = new Point(x, 1);
+                x += p.Width + Theme.P(8);
+            }
+            int ly = pillBar.Bottom + Theme.P(12);
+            listCard.SetBounds(pad, ly, W - 2 * pad, Math.Max(Theme.P(80), H - ly - Theme.P(16)));
+        }
+
+        void LayoutFooter()
+        {
+            int pad = Theme.P(32), W = footer.Width, H = footer.Height;
+            int by = (H - btnSync.Height) / 2;
+            int x = W - pad - btnSync.Width;
+            btnSync.Location = new Point(x, by);
+            btnCancel.Location = new Point(W - pad - btnCancel.Width, by);
+            x -= Theme.P(8) + btnClose.Width;
+            btnClose.Location = new Point(x, by);
+            x -= Theme.P(8) + btnLog.Width;
+            btnLog.Location = new Point(x, by);
+            int textW = Math.Max(10, x - pad - Theme.P(16));
+            sum1.SetBounds(pad, Theme.P(14), textW, Theme.P(22));
+            sum2.SetBounds(pad, Theme.P(38), textW, Theme.P(20));
+            progress.SetBounds(pad, Theme.P(42), Math.Max(10, btnCancel.Left - pad - Theme.P(24)), progress.Height);
+        }
+
+        void PaintSummary(object sender, PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            int pad = Theme.P(20), W = summary.Width, H = summary.Height;
+            int mid = Theme.P(150);
+            int colW = (W - 2 * pad - mid) / 2;
+            DrawSide(g, "ORDNER A", Devices.Glyph(job.DeviceA, job.FolderA), job.FolderA, an == null ? null : an.FilesA.ToString("N0") + " Dateien · " + Fmt.Size(an.BytesA),
+                new Rectangle(pad, 0, colW, H), TextFormatFlags.Left);
+            DrawSide(g, "ORDNER B", Devices.Glyph(job.DeviceB, job.FolderB), job.FolderB, an == null ? null : an.FilesB.ToString("N0") + " Dateien · " + Fmt.Size(an.BytesB),
+                new Rectangle(W - pad - colW, 0, colW, H), TextFormatFlags.Right);
+            Rectangle c = new Rectangle(pad + colW, Theme.P(14), mid, Theme.P(36));
+            Theme.DrawGlyph(g, job.Mode == SyncMode.Abgleichen ? Theme.GSwitch : Theme.GForward, 18f, c, Theme.Accent, TextFormatFlags.HorizontalCenter);
+            Theme.DrawText(g, job.ModeText, Theme.Small, new Rectangle(pad + colW, Theme.P(52), mid, Theme.P(22)), Theme.TextDim, TextFormatFlags.HorizontalCenter);
+        }
+
+        void DrawSide(Graphics g, string label, char glyph, string path, string stats, Rectangle r, TextFormatFlags align)
+        {
+            int gs = Theme.P(16), gap = Theme.P(22);
+            bool right = (align & TextFormatFlags.Right) != 0;
+            Image img = MenuHelper.Glyph(glyph, Theme.Text, gs);
+            if (img != null)
+            {
+                g.DrawImage(img, right ? r.Right - gs : r.X, Theme.P(16), gs, gs);
+                img.Dispose();
+            }
+            Rectangle lr = right ? new Rectangle(r.X, Theme.P(14), r.Width - gap, Theme.P(20)) : new Rectangle(r.X + gap, Theme.P(14), r.Width - gap, Theme.P(20));
+            Theme.DrawText(g, label, Theme.Small, lr, Theme.TextDim, align);
+            TextRenderer.DrawText(g, path, Theme.Mono, new Rectangle(r.X, Theme.P(36), r.Width, Theme.P(22)), Theme.Text,
+                align | TextFormatFlags.PathEllipsis | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix | TextFormatFlags.VerticalCenter);
+            if (stats != null)
+                Theme.DrawText(g, stats, Theme.Small, new Rectangle(r.X, Theme.P(60), r.Width, Theme.P(20)), Theme.TextDim, align);
+        }
+
+        // ---------- Liste ----------
+
+        void OnRetrieve(object sender, RetrieveVirtualItemEventArgs e)
+        {
+            PlanItem it = e.ItemIndex < view.Count ? view[e.ItemIndex] : null;
+            if (it == null) { e.Item = new ListViewItem(new string[] { "", "", "", "", "", "" }); return; }
+            string size = it.IsDir ? "Ordner" : Fmt.Size((it.A ?? it.B).Size);
+            e.Item = new ListViewItem(new string[]
+            {
+                Engine.ActionText(it.Chosen, it.IsDir),
+                it.IsDir ? it.Rel + "\\" : it.Rel,
+                size,
+                Time(it.A),
+                Time(it.B),
+                showingResult && it.Done ? "\u2713 Erledigt"
+                : showingResult && it.Failed ? "Fehler: " + (it.Error ?? "unbekannt")
+                : showingResult && (it.IsCopy || it.IsDelete || it.IsRename) ? "Nicht ausgeführt (abgebrochen)"
+                : it.Chosen != it.Proposed ? "Geändert von dir (Vorschlag: " + Engine.ActionText(it.Proposed, it.IsDir) + ")" : it.Reason
+            });
+        }
+
+        static string Time(FileEntry e)
+        {
+            if (e == null) return "—";
+            if (e.IsDir) return "";
+            return e.Mtime.ToLocalTime().ToString("dd.MM.yy HH:mm");
+        }
+
+        static void ChipColors(ActionKind k, out Color fg, out Color bg)
+        {
+            switch (k)
+            {
+                case ActionKind.NachB: fg = Theme.AccentSoftText; bg = Theme.AccentSoft; break;
+                case ActionKind.NachA: fg = Theme.Purple; bg = Theme.PurpleBg; break;
+                case ActionKind.LoeschenA:
+                case ActionKind.LoeschenB: fg = Theme.Err; bg = Theme.ErrBg; break;
+                case ActionKind.Konflikt: fg = Theme.Warn; bg = Theme.WarnBg; break;
+                case ActionKind.UmbenennenA:
+                case ActionKind.UmbenennenB: fg = Theme.Ok; bg = Theme.OkBg; break;
+                default: fg = Theme.Neutral; bg = Theme.NeutralBg; break;
+            }
+        }
+
+        bool DrawCell(DrawListViewSubItemEventArgs e, Color bg)
+        {
+            if (e.ItemIndex >= view.Count) return true;
+            PlanItem it = view[e.ItemIndex];
+            if (e.ColumnIndex == 0)
+            {
+                Color fg, cbg;
+                ChipColors(it.Chosen, out fg, out cbg);
+                Theme.Chip(e.Graphics, e.SubItem.Text, Theme.Small, e.Bounds.X + Theme.P(10), e.Bounds.Y + e.Bounds.Height / 2, fg, cbg);
+                return true;
+            }
+            if (e.ColumnIndex == 1)
+            {
+                Rectangle r = new Rectangle(e.Bounds.X + Theme.P(12), e.Bounds.Y, e.Bounds.Width - Theme.P(20), e.Bounds.Height);
+                TextRenderer.DrawText(e.Graphics, e.SubItem.Text, Theme.Body, r, Theme.Text,
+                    TextFormatFlags.PathEllipsis | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix | TextFormatFlags.VerticalCenter);
+                return true;
+            }
+            if (e.ColumnIndex == 5 && it.Chosen != it.Proposed)
+            {
+                Rectangle r = new Rectangle(e.Bounds.X + Theme.P(12), e.Bounds.Y, e.Bounds.Width - Theme.P(20), e.Bounds.Height);
+                Theme.DrawText(e.Graphics, e.SubItem.Text, Theme.Body, r, Theme.Accent, TextFormatFlags.Left);
+                return true;
+            }
+            return false;
+        }
+
+        void ApplyFilter()
+        {
+            if (an == null) view = new List<PlanItem>();
+            else
+            {
+                switch (filterIndex)
+                {
+                    case 1: view = an.Actions.Where(x => x.Chosen == ActionKind.NachB).ToList(); break;
+                    case 2: view = an.Actions.Where(x => x.Chosen == ActionKind.NachA).ToList(); break;
+                    case 3: view = an.Actions.Where(x => x.IsDelete).ToList(); break;
+                    case 4: view = an.Actions.Where(x => x.Chosen == ActionKind.Konflikt || x.Chosen == ActionKind.Keine).ToList(); break;
+                    default: view = new List<PlanItem>(an.Actions); break;
+                }
+            }
+            list.SelectedIndices.Clear();
+            list.VirtualListSize = view.Count;
+            list.Stretch();
+            list.Invalidate();
+        }
+
+        List<PlanItem> Selected()
+        {
+            List<PlanItem> r = new List<PlanItem>();
+            foreach (int i in list.SelectedIndices) if (i < view.Count) r.Add(view[i]);
+            return r;
+        }
+
+        void MenuOpening(object sender, System.ComponentModel.CancelEventArgs e)
+        {
+            List<PlanItem> sel = Selected();
+            if (sel.Count == 0 || busy || showingResult) { e.Cancel = true; return; }
+            miToB.Enabled = sel.Any(x => x.CanChoose(ActionKind.NachB));
+            miToA.Enabled = sel.Any(x => x.CanChoose(ActionKind.NachA));
+            miDelA.Enabled = sel.Any(x => x.CanChoose(ActionKind.LoeschenA));
+            miDelB.Enabled = sel.Any(x => x.CanChoose(ActionKind.LoeschenB));
+            miSkip.Enabled = true;
+            miReset.Enabled = sel.Any(x => x.Chosen != x.Proposed);
+            miShowA.Enabled = sel.Count == 1 && sel[0].A != null && !FtpUrl.IsRemote(job.FolderA);
+            miShowB.Enabled = sel.Count == 1 && sel[0].B != null && !FtpUrl.IsRemote(job.FolderB);
+        }
+
+        void Choose(ActionKind k)
+        {
+            foreach (PlanItem it in Selected())
+                if (it.CanChoose(k)) it.Chosen = k;
+            list.Invalidate();
+            UpdateUi();
+        }
+
+        void RestoreProposal()
+        {
+            foreach (PlanItem it in Selected()) it.Chosen = it.Proposed;
+            list.Invalidate();
+            UpdateUi();
+        }
+
+        void Reveal(bool sideA)
+        {
+            List<PlanItem> sel = Selected();
+            if (sel.Count != 1) return;
+            Ui.Explore(Path.Combine(Paths.TryResolve(sideA ? job.FolderA : job.FolderB), sel[0].Rel), true);
+        }
+
+        void ShowSelected()
+        {
+            List<PlanItem> sel = Selected();
+            if (sel.Count != 1) return;
+            bool sideA = sel[0].A != null && !FtpUrl.IsRemote(job.FolderA);
+            if (!sideA && (sel[0].B == null || FtpUrl.IsRemote(job.FolderB))) return;
+            Reveal(sideA);
+        }
+
+        /// <summary>Alle Löschungen dieser Analyse landen im Papierkorb (nicht bei FTP-Seiten).</summary>
+        bool RecycleAll()
+        {
+            if (!job.UseRecycleBin || an == null) return false;
+            foreach (PlanItem it in an.Actions)
+            {
+                if (it.Chosen == ActionKind.LoeschenA && FtpUrl.IsRemote(job.FolderA)) return false;
+                if (it.Chosen == ActionKind.LoeschenB && FtpUrl.IsRemote(job.FolderB)) return false;
+            }
+            return true;
+        }
+
+        // ---------- Zustand anzeigen ----------
+
+        void OnTick(object sender, EventArgs e)
+        {
+            if (!busy) return;
+            status.Text = liveStatus;
+            int n = progN;
+            if (n > 0)
+            {
+                if (progress.Style != ProgressBarStyle.Continuous) progress.Style = ProgressBarStyle.Continuous;
+                progress.Value = Math.Max(0, Math.Min(1000, (int)((long)progI * 1000 / n)));
+                sum1.Text = progI.ToString("N0") + " von " + n.ToString("N0") + " Aktionen";
+            }
+            else if (progress.Style != ProgressBarStyle.Marquee) progress.Style = ProgressBarStyle.Marquee;
+        }
+
+        void UpdateUi()
+        {
+            btnRe.Enabled = !busy;
+            btnBack.Enabled = !busy;
+            foreach (Pill p in pills) p.Enabled = !busy;
+            btnSync.Visible = !busy;
+            btnClose.Visible = !busy;
+            btnLog.Visible = !busy && lastRun != null && !string.IsNullOrEmpty(lastRun.LogFile);
+            btnCancel.Visible = busy;
+            progress.Visible = busy;
+            sum2.Visible = !busy;
+            btnSync.Enabled = an != null && an.CountActive > 0 && !showingResult;
+
+            if (busy) { summary.Invalidate(); return; }
+
+            if (an != null)
+            {
+                pills[0].Count = an.Actions.Count;
+                pills[1].Count = an.Actions.Count(x => x.Chosen == ActionKind.NachB);
+                pills[2].Count = an.Actions.Count(x => x.Chosen == ActionKind.NachA);
+                pills[3].Count = an.Actions.Count(x => x.IsDelete);
+                pills[4].Count = an.Actions.Count(x => x.Chosen == ActionKind.Konflikt || x.Chosen == ActionKind.Keine);
+            }
+            else foreach (Pill p in pills) p.Count = 0;
+            PerformLayout();
+
+            string info;
+            if (error != null) info = error;
+            else if (an == null) info = "";
+            else
+            {
+                info = "Analyse abgeschlossen · " + Fmt.Duration(an.Seconds);
+                if (an.ScanErrors.Count > 0) info += " · " + an.ScanErrors.Count + " Einträge nicht lesbar";
+            }
+            if (resultMsg != null) info = resultMsg + "  ·  " + info;
+            status.Text = info;
+            status.ForeColor = (error != null || resultBad) ? Theme.Err : Theme.TextDim;
+
+            if (showingResult && lastRun != null)
+            {
+                sum1.Text = lastRun.Cancelled ? "Abgebrochen" : lastRun.Errors > 0 ? "Fertig – mit Fehlern" : "Fertig";
+                sum2.Text = "Die Liste zeigt, was gemacht wurde. „Neu analysieren“ zeigt den aktuellen Stand.";
+            }
+            else if (an == null)
+            {
+                sum1.Text = error != null ? "Analyse nicht möglich" : "";
+                sum2.Text = error != null ? "Prüfe, ob beide Ordner erreichbar sind (z. B. USB-Laufwerk oder NAS)." : "";
+            }
+            else if (an.CountActive == 0)
+            {
+                sum1.Text = an.CountUnknown > 0 ? "Bitte entscheiden: neu oder gelöscht?" :
+                    an.Actions.Count == 0 ? "Alles aktuell – nichts zu tun" : "Keine Aktionen ausgewählt";
+                sum2.Text = Hints();
+            }
+            else
+            {
+                sum1.Text = an.CountActive.ToString("N0") + (an.CountActive == 1 ? " Aktion" : " Aktionen") +
+                            " · " + Fmt.Size(an.TransferBytes) + " werden übertragen";
+                sum2.Text = Hints();
+            }
+            summary.Invalidate();
+        }
+
+        string Hints()
+        {
+            List<string> parts = new List<string>();
+            int del = an.CountDeletes, con = an.CountConflicts, skip = an.CountSkipped, ren = an.CountRenames, unk = an.CountUnknown;
+            if (unk > 0)
+            {
+                // Stand verloren: Einträge nur auf einer Seite – neu oder auf der anderen Seite gelöscht?
+                parts.Add((an.StateNote ?? "Der gespeicherte Stand fehlt.") + " " + unk.ToString("N0") +
+                    (unk == 1 ? " Eintrag liegt" : " Einträge liegen") + " nur auf einer Seite – neu oder gelöscht? " +
+                    "Auswählen (Strg+A für alle) und per Rechtsklick kopieren oder löschen");
+                con -= unk;
+            }
+            else if (an.StateNote != null) parts.Add(an.StateNote);
+            if (ren > 0) parts.Add(ren.ToString("N0") + (ren == 1 ? " Umbenennung" : " Umbenennungen") + " ohne erneutes Übertragen");
+            if (del > 0) parts.Add(del.ToString("N0") + " Löschungen " + (RecycleAll() ? "(in den Papierkorb)" : "(endgültig)"));
+            if (con > 0) parts.Add(con.ToString("N0") + " Konflikte werden übersprungen – Rechtsklick zum Entscheiden");
+            if (skip > 0) parts.Add(skip.ToString("N0") + " übersprungen");
+            if (parts.Count == 0) return "Rechtsklick auf Einträge, um die Aktion zu ändern";
+            return string.Join(" · ", parts);
+        }
+
+        void Ui_(Action a)
+        {
+            if (IsDisposed || !IsHandleCreated) return;
+            try { BeginInvoke(a); }
+            catch (InvalidOperationException) { }
+        }
+
+        // ---------- Analyse ----------
+
+        void StartAnalysis(bool thenSync)
+        {
+            if (busy) return;
+            busy = true;
+            cancel = false;
+            progN = 0;
+            progI = 0;
+            liveStatus = "Analysiere …";
+            sum1.Text = "Analysiere …";
+            showingResult = false;
+            btnCancel.Enabled = true;
+            UpdateUi();
+            LayoutFooter();
+
+            Thread t = new Thread(delegate ()
+            {
+                Analysis result = null;
+                Exception err = null;
+                try { result = Engine.Analyze(job, delegate { return cancel; }, delegate (string s) { liveStatus = s; }); }
+                catch (Exception ex) { err = ex; }
+                Ui_(delegate { AnalysisDone(result, err, thenSync); });
+            });
+            t.IsBackground = true;
+            t.Start();
+        }
+
+        void AnalysisDone(Analysis result, Exception err, bool thenSync)
+        {
+            busy = false;
+            bool wasCancel = cancel;
+            an = result;
+            error = null;
+            if (err is OperationCanceledException) error = "Analyse abgebrochen";
+            else if (err != null) error = err.Message;
+            ApplyFilter();
+            UpdateUi();
+            if (wasCancel) { Main.ViewIdle(); return; }
+
+            if (thenSync && an != null)
+            {
+                if (an.CountActive == 0) { }
+                else if (an.CountConflicts > 0)
+                    status.Text = "Es gibt Konflikte. Bitte prüfen (Rechtsklick) und dann synchronisieren.";
+                else if (Engine.SafetyCheck(an) != null)
+                    status.Text = "Ungewöhnlich viele Löschungen – bitte die Liste prüfen und dann synchronisieren.";
+                else
+                {
+                    StartSync(false);
+                    return;
+                }
+            }
+            Main.ViewIdle();
+        }
+
+        // ---------- Synchronisieren ----------
+
+        void StartSync(bool ask)
+        {
+            if (busy || an == null || an.CountActive == 0) return;
+            string warn = Engine.SafetyCheck(an);
+            if (warn != null)
+            {
+                DialogResult r = MessageBox.Show("Achtung: " + warn + ".\n\nTrotzdem synchronisieren?", "Sync Pilot",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+                if (r != DialogResult.Yes) return;
+            }
+            else if (ask && !RecycleAll() && an.CountDeletes > 0)
+            {
+                DialogResult r = MessageBox.Show(an.CountDeletes.ToString("N0") + " Dateien werden endgültig gelöscht (nicht in den Papierkorb).\n\nFortfahren?",
+                    "Sync Pilot", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                if (r != DialogResult.Yes) return;
+            }
+
+            busy = true;
+            cancel = false;
+            progI = 0;
+            progN = an.CountActive;
+            liveStatus = "Synchronisiere …";
+            btnCancel.Enabled = true;
+            UpdateUi();
+            LayoutFooter();
+
+            Analysis current = an;
+            Thread t = new Thread(delegate ()
+            {
+                HistoryEntry h;
+                try
+                {
+                    h = Runner.ExecuteAnalysis(current, false, delegate { return cancel; },
+                        delegate (int i, int n, string text) { progI = i; progN = n; liveStatus = "Synchronisiere … " + text; });
+                }
+                catch (Exception ex) { h = Runner.Crash(job, false, ex); }
+                Ui_(delegate { SyncDone(h); });
+            });
+            t.IsBackground = true;
+            t.Start();
+        }
+
+        void SyncDone(HistoryEntry h)
+        {
+            busy = false;
+            lastRun = h;
+            resultBad = !h.IsOk;
+            if (h.Cancelled) resultMsg = "Abgebrochen nach " + h.Copied + " Kopien und " + h.Deleted + " Löschungen";
+            else if (h.Errors > 0 && h.Copied == 0 && h.Deleted == 0 && !string.IsNullOrEmpty(h.Result) && h.Result.StartsWith("Fehler"))
+                resultMsg = h.Result;
+            else
+                resultMsg = "Synchronisiert: " + h.Copied + " kopiert, " + (h.Moved > 0 ? h.Moved + " umbenannt, " : "") +
+                            h.Deleted + " gelöscht, " + h.Errors +
+                            (h.Errors == 1 ? " Fehler" : " Fehler") + " (" + Fmt.Size(h.Bytes) + ")";
+            // Ergebnis stehen lassen statt sofort neu zu analysieren, damit man sieht, was gemacht wurde
+            showingResult = true;
+            ApplyFilter();
+            UpdateUi();
+            Main.ViewIdle();
+        }
+    }
+}

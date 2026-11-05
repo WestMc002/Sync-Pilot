@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#F3F3F3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#202020" media="(prefers-color-scheme: dark)">
+<title>Sync Pilot</title>
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon.png">
+<link rel="apple-touch-icon" href="/icon.png">
+<link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/theme.css">
+</head>
+<body>
+<header class="top">
+  <img class="appicon" src="/icon.png" alt="">
+  <span class="title">Sync Pilot</span>
+  <button class="pill" id="version" type="button" aria-label="Info über Sync Pilot"></button>
+  <span class="grow"></span>
+  <button class="icon-btn" id="logout" type="button" aria-label="Abmelden" hidden>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M10 16l-4-4 4-4M6 12h10"/></svg>
+  </button>
+</header>
+
+<main id="app">
+  <section id="view-login" class="view" hidden>
+    <div class="card login">
+      <h1>Anmelden</h1>
+      <p class="muted">Am einfachsten: in Sync Pilot unter „Einstellungen“ den QR-Code anzeigen und mit dem Handy scannen. Oder hier das Kennwort für den Handy-Zugriff eingeben.</p>
+      <form id="login-form">
+        <label for="pw">Kennwort</label>
+        <input id="pw" type="password" autocomplete="current-password" required>
+        <p class="error" id="login-error" role="alert"></p>
+        <button class="btn primary" type="submit">Anmelden</button>
+      </form>
+    </div>
+  </section>
+
+  <section id="view-jobs" class="view" hidden>
+    <h1>Aufgaben</h1>
+    <div id="jobs" class="list"></div>
+  </section>
+
+  <section id="view-analysis" class="view" hidden>
+    <button class="back" type="button" data-go="jobs">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg> Aufgaben
+    </button>
+    <h1 id="an-name"></h1>
+    <p class="muted" id="an-status" role="status"></p>
+    <div class="card sides">
+      <div><div class="label">ORDNER A</div><div class="path" id="an-a"></div><div class="muted small" id="an-sa"></div></div>
+      <div class="mode" id="an-mode"></div>
+      <div><div class="label">ORDNER B</div><div class="path" id="an-b"></div><div class="muted small" id="an-sb"></div></div>
+    </div>
+    <div class="progress" id="an-progress" hidden><div id="an-bar"></div></div>
+    <div class="chips" id="an-filter" role="group" aria-label="Aktionen filtern"></div>
+    <div id="an-items" class="list compact"></div>
+    <p class="muted small" id="an-more"></p>
+    <div class="actionbar">
+      <div class="sum"><div id="an-sum1" class="strong"></div><div id="an-sum2" class="muted small"></div></div>
+      <button class="btn" type="button" id="an-reanalyze">Neu analysieren</button>
+      <button class="btn primary" type="button" id="an-sync">Synchronisieren</button>
+      <button class="btn" type="button" id="an-cancel" hidden>Abbrechen</button>
+    </div>
+  </section>
+
+  <section id="view-history" class="view" hidden>
+    <h1>Verlauf</h1>
+    <div id="history" class="list compact"></div>
+  </section>
+
+  <section id="view-log" class="view" hidden>
+    <button class="back" type="button" data-go="history">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg> Verlauf
+    </button>
+    <h1 id="log-title"></h1>
+    <pre class="card log" id="log-text"></pre>
+  </section>
+</main>
+
+<nav class="tabs" id="tabs" hidden>
+  <button type="button" data-go="jobs" class="active">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h13l-3-3M20 15H7l3 3"/></svg><span>Aufgaben</span>
+  </button>
+  <button type="button" data-go="history">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg><span>Verlauf</span>
+  </button>
+</nav>
+
+<!-- Info (Tippen auf die Version) statt Fußzeile: spart Platz in der Liste (wie Wake on LAN) -->
+<div class="sheet-bg" id="info" hidden>
+  <div class="sheet info" role="dialog" aria-modal="true" aria-labelledby="info-title">
+    <img class="info-logo" src="/logo.png" alt="">
+    <h3 id="info-title">Sync Pilot</h3>
+    <p id="info-version" class="info-version"></p>
+    <dl class="info-data">
+      <dt>Entwickler</dt><dd>Günther Schoder</dd>
+      <dt>Website</dt><dd><a href="https://www.westmc002.de" target="_blank" rel="noopener">www.westmc002.de</a></dd>
+      <dt>Verbunden mit</dt><dd id="info-pc">–</dd>
+    </dl>
+    <p id="copyright" class="muted small center">© Günther Schoder</p>
+    <button class="btn primary wide" type="button" id="info-close">Schließen</button>
+  </div>
+</div>
+
+<div class="sheet-bg" id="sheet" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+    <div class="sheet-title" id="sheet-title"></div>
+    <div class="muted small" id="sheet-sub"></div>
+    <div id="sheet-buttons"></div>
+    <button class="btn wide" type="button" id="sheet-close">Schließen</button>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
