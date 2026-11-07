@@ -19,13 +19,19 @@ namespace SyncPilot
 
         readonly Panel scroll, footer;
         readonly Label title;
-        readonly Card cFolders, cMode, cExcl, cOpts, cSched, cEvt;
-        readonly InputBox name, folderA, folderB, exFiles, exDirs, inFiles, inDirs;
-        readonly FlatButton browseA, browseB, btnCancel, btnSaveAnalyze, btnSave, credA, credB;
+        readonly Card cFolders, cMode, cExcl, cOpts, cSched, cEvt, cPro;
+        readonly InputBox name, folderA, folderB, exFiles, exDirs, inFiles, inDirs, nameA, nameB, groupBox;
+        // Für Profis
+        readonly ChoiceBox cbConflict;
+        readonly ToggleSwitch tNoDelA, tNoDelB, tScriptsChanged, tScriptAbort;
+        readonly InputBox lockFile, scriptBefore, scriptAfter;
+        readonly Label lNoDelA, lNoDelB, lWatchA, lWatchB;
+        static readonly ConflictRule[] Rules = { ConflictRule.Fragen, ConflictRule.Neuer, ConflictRule.AGewinnt, ConflictRule.BGewinnt };
+        readonly FlatButton btnSwap, browseA, browseB, btnCancel, btnSaveAnalyze, btnSave, credA, credB;
         readonly DeviceCombo devA, devB;
         string userA, passA, userB, passB, certA, certB;
         readonly ModeCard mSync, mBackup, mMirror;
-        readonly ToggleSwitch tDeletes, tRecycle, tHidden, tContent, tActive;
+        readonly ToggleSwitch tDeletes, tRecycle, tHidden, tContent, tActive, tDst, tRights, tVersions, tSubdirs;
         readonly InputBox minSize, maxSize;
         readonly Label lDeletesDesc;
         readonly ChoiceBox cbSchedule, cbInterval;
@@ -56,7 +62,7 @@ namespace SyncPilot
             if (job == null) j.ExcludeFiles.AddRange(DefaultExcludes);
             j.Upgrade();
 
-            scroll = new Panel();
+            scroll = new ScrollPanel();
             scroll.Dock = DockStyle.Fill;
             scroll.AutoScroll = true;
             scroll.BackColor = Theme.Bg;
@@ -101,8 +107,8 @@ namespace SyncPilot
             folderB.Text = j.FolderB;
             browseA = new FlatButton("Durchsuchen \u2026", Theme.GFolder, BtnKind.Secondary);
             browseB = new FlatButton("Durchsuchen \u2026", Theme.GFolder, BtnKind.Secondary);
-            browseA.Click += delegate { Browse(folderA, "Ordner A ausw\u00e4hlen"); };
-            browseB.Click += delegate { Browse(folderB, "Ordner B ausw\u00e4hlen"); };
+            browseA.Click += delegate { Browse(folderA, SideTitle(true) + " ausw\u00e4hlen"); };
+            browseB.Click += delegate { Browse(folderB, SideTitle(false) + " ausw\u00e4hlen"); };
             userA = j.UserA; passA = j.PassA; userB = j.UserB; passB = j.PassB; certA = j.CertA; certB = j.CertB;
             credA = new FlatButton("Anmeldung", "\uE72E", BtnKind.Secondary);
             credB = new FlatButton("Anmeldung", "\uE72E", BtnKind.Secondary);
@@ -120,28 +126,74 @@ namespace SyncPilot
             folderB.Box.TextChanged += delegate { devB.Invalidate(); };
             UpdateCredButtons();
             Label lName = FieldLabel("Name der Aufgabe", name);
+            // Gruppe: ordnet die Aufgabenliste (z. B. nach Rechner oder NAS); Vorschläge aus vorhandenen Gruppen
+            groupBox = new InputBox(false, false);
+            groupBox.Text = j.Group ?? "";
+            groupBox.Cue = "z. B. NAS";
+            AutoCompleteStringCollection groups = new AutoCompleteStringCollection();
+            groups.AddRange(Main.Jobs.Where(x => !string.IsNullOrWhiteSpace(x.Group)).Select(x => x.Group.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x).ToArray());
+            groupBox.Box.AutoCompleteCustomSource = groups;
+            groupBox.Box.AutoCompleteSource = AutoCompleteSource.CustomSource;
+            groupBox.Box.AutoCompleteMode = AutoCompleteMode.SuggestAppend;
+            Label lGroup = FieldLabel("Gruppe (optional)", groupBox);
             Label lA = FieldLabel("Ordner A (Quelle)", folderA);
             Label lB = FieldLabel("Ordner B (Ziel bzw. Gegenst\u00fcck)", folderB);
+            nameA = new InputBox(false, false);
+            nameB = new InputBox(false, false);
+            nameA.Text = j.NameA ?? "";
+            nameB.Text = j.NameB ?? "";
+            nameA.Cue = "z. B. PC";
+            nameB.Cue = "z. B. NAS";
+            Label lNA = FieldLabel("Bezeichnung für A", nameA);
+            Label lNB = FieldLabel("Bezeichnung für B", nameB);
+            Label lNamesHint = Ui.WrapLabel("Erscheint statt „A“ und „B“ in der Analyse, im Protokoll und auf dem Handy – z. B. „Nach NAS“.",
+                Theme.Small, Theme.TextDim, Theme.Surface);
+            nameA.Box.TextChanged += delegate { lA.Text = "Ordner A (Quelle)" + (nameA.Text.Trim().Length > 0 ? " · " + nameA.Text.Trim() : ""); };
+            nameB.Box.TextChanged += delegate { lB.Text = "Ordner B (Ziel bzw. Gegenst\u00fcck)" + (nameB.Text.Trim().Length > 0 ? " · " + nameB.Text.Trim() : ""); };
+            if (nameA.Text.Trim().Length > 0) lA.Text += " · " + nameA.Text.Trim();
+            if (nameB.Text.Trim().Length > 0) lB.Text += " · " + nameB.Text.Trim();
             Label pathHint = Ui.WrapLabel("Auch m\u00f6glich:  \\\\Server\\Freigabe  \u00b7  %USERPROFILE%\\Dokumente  \u00b7  " +
                 "%DRIVELETTER:MeinUsbStick%:\\Sicherung  \u00b7  ftp://server/pfad  \u00b7  ftps://\u2026 (FTPS explizit)  \u00b7  ftpsim://\u2026 (implizit)  \u00b7  sftp://\u2026",
                 Theme.Small, Theme.TextDim, Theme.Surface);
-            cFolders.Controls.AddRange(new Control[] { lName, name, lA, devA, folderA, browseA, credA, lB, devB, folderB, browseB, credB, pathHint });
+            // Quelle und Ziel tauschen (mit allem, was zu einer Seite gehört)
+            btnSwap = new FlatButton("A und B tauschen", "\uE8AB", BtnKind.Subtle);
+            btnSwap.Height = Theme.P(26);
+            btnSwap.FitWidth();
+            btnSwap.Click += delegate { SwapForm(); };
+            cFolders.Controls.Add(btnSwap);
+            cFolders.Controls.AddRange(new Control[] { lName, name, lGroup, groupBox, lA, devA, folderA, browseA, credA, lB, devB, folderB, browseB, credB, pathHint,
+                lNA, nameA, lNB, nameB, lNamesHint });
             cFolders.Height = Theme.P(340);
             cFolders.Resize += delegate
             {
                 int p = Theme.P(20), w = cFolders.Width - 2 * p, y = Theme.P(56), g = Theme.P(8);
+                int gw = Math.Max(Theme.P(140), (w - Theme.P(16)) * 35 / 100), nw = w - gw - Theme.P(16);
                 lName.Location = new Point(p, y);
-                name.SetBounds(p, y + Theme.P(22), w, name.Height);
+                name.SetBounds(p, y + Theme.P(22), nw, name.Height);
+                lGroup.Location = new Point(p + nw + Theme.P(16), y);
+                groupBox.SetBounds(p + nw + Theme.P(16), y + Theme.P(22), gw, groupBox.Height);
                 y += Theme.P(74);
                 RowLayout(lA, devA, folderA, browseA, credA, p, w, y, g);
                 y += Theme.P(74);
                 RowLayout(lB, devB, folderB, browseB, credB, p, w, y, g);
+                btnSwap.Location = new Point(p + w - btnSwap.Width, y - Theme.P(6)); // endet über den Feldern darunter
                 y += Theme.P(66);
                 // Hinweis so hoch wie nötig (bei schmalem Fenster drei Zeilen), Karte wächst mit
                 int hh = TextRenderer.MeasureText(pathHint.Text, pathHint.Font, new Size(Math.Max(10, w), 0),
                     TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix).Height + Theme.P(4);
                 pathHint.SetBounds(p, y, w, hh);
-                int need = y + hh + Theme.P(20);
+                y += hh + Theme.P(16);
+                int half = (w - Theme.P(16)) / 2;
+                lNA.Location = new Point(p, y);
+                lNB.Location = new Point(p + half + Theme.P(16), y);
+                nameA.SetBounds(p, y + Theme.P(22), half, nameA.Height);
+                nameB.SetBounds(p + half + Theme.P(16), y + Theme.P(22), half, nameB.Height);
+                y += Theme.P(22) + nameA.Height + Theme.P(6);
+                int nh = TextRenderer.MeasureText(lNamesHint.Text, lNamesHint.Font, new Size(Math.Max(10, w), 0),
+                    TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix).Height + Theme.P(4);
+                lNamesHint.SetBounds(p, y, w, nh);
+                int need = y + nh + Theme.P(20);
                 if (cFolders.Height != need) cFolders.Height = need;
             };
 
@@ -159,13 +211,7 @@ namespace SyncPilot
                 cMode.Controls.Add(m);
             }
             cMode.Height = Theme.P(200);
-            cMode.Resize += delegate
-            {
-                int p = Theme.P(20), gap = Theme.P(10), w = (cMode.Width - 2 * p - 2 * gap) / 3, y = Theme.P(56);
-                mSync.SetBounds(p, y, w, mSync.Height);
-                mBackup.SetBounds(p + w + gap, y, w, mBackup.Height);
-                mMirror.SetBounds(p + 2 * (w + gap), y, cMode.Width - 2 * p - 2 * (w + gap), mMirror.Height);
-            };
+            cMode.Resize += delegate { LayoutModeCards(); };
 
             // --- Filter (Negativ- und Positivliste wie bei Easy2Sync) ---
             cExcl = Section("Filter");
@@ -253,19 +299,32 @@ namespace SyncPilot
             tRecycle.Checked = j.UseRecycleBin;
             tHidden.Checked = j.IncludeHidden;
             tContent.Checked = j.CompareContent;
+            tDst = new ToggleSwitch();
+            tRights = new ToggleSwitch();
+            tVersions = new ToggleSwitch();
+            tDst.Checked = j.IgnoreDstOffset;
+            tRights.Checked = j.CopyRights;
+            tVersions.Checked = j.KeepVersions;
+            tSubdirs = new ToggleSwitch();
+            tSubdirs.Checked = j.IncludeSubdirs;
             lDeletesDesc = null;
-            const int Rows = 5, RowH = 74;
+            const int Rows = 9, RowH = 74;
             Label[] rowsTitle = new Label[Rows];
             Label[] rowsDesc = new Label[Rows];
-            ToggleSwitch[] toggles = { tActive, tDeletes, tRecycle, tHidden, tContent };
-            string[] titles = { "Aufgabe aktiv", "Löschungen übernehmen", "In den Papierkorb", "Versteckte Dateien", "Inhalt vergleichen" };
+            ToggleSwitch[] toggles = { tActive, tSubdirs, tDeletes, tRecycle, tVersions, tHidden, tContent, tDst, tRights };
+            string[] titles = { "Aufgabe aktiv", "Unterordner einbeziehen", "Löschungen übernehmen", "In den Papierkorb", "Ältere Versionen aufbewahren", "Versteckte Dateien",
+                "Inhalt vergleichen", "Sommerzeit-Versatz ignorieren", "NTFS-Rechte übertragen" };
             string[] descs =
             {
                 "Aus: läuft nicht nach Zeitplan und nicht bei „Alle synchronisieren“",
+                "Aus: nur die Dateien direkt im gewählten Ordner abgleichen, ohne Unterordner",
                 "Was auf einer Seite gelöscht wurde, wird auch auf der anderen entfernt",
                 "Gelöschte Dateien landen im Papierkorb statt endgültig weg zu sein",
+                "Überschriebene und gelöschte Dateien kommen vorher in den Ordner „" + Engine.VersionsDir + "“ derselben Seite",
                 "Auch versteckte und Systemdateien abgleichen",
-                "Bei gleicher Größe, aber anderem Datum den Inhalt prüfen (langsamer)"
+                "Bei gleicher Größe, aber anderem Datum den Inhalt prüfen (langsamer)",
+                "Gleiche Größe und genau 1 Stunde Zeitunterschied gilt als gleich (FAT-Laufwerke, USB-Sticks, manche NAS)",
+                "Zugriffsrechte von Dateien und Ordnern mitkopieren – nur zwischen Windows-Laufwerken und -Freigaben"
             };
             for (int i = 0; i < Rows; i++)
             {
@@ -279,7 +338,7 @@ namespace SyncPilot
                 ToggleSwitch tg = toggles[i];
                 lt.Click += delegate { if (tg.Enabled) tg.Checked = !tg.Checked; };
             }
-            lDeletesDesc = rowsDesc[1];
+            lDeletesDesc = rowsDesc[2];
             cOpts.Height = Theme.P(56 + Rows * RowH + 8);
             cOpts.Paint += delegate (object s, PaintEventArgs e)
             {
@@ -403,8 +462,8 @@ namespace SyncPilot
             tWatchB.Checked = j.WatchB;
             tWatchA.AccessibleName = "Ordner A überwachen";
             tWatchB.AccessibleName = "Ordner B überwachen";
-            Label lWatchA = Ui.Label("Ordner A überwachen", Theme.Body, Theme.Text, Theme.Surface);
-            Label lWatchB = Ui.Label("Ordner B überwachen", Theme.Body, Theme.Text, Theme.Surface);
+            lWatchA = Ui.Label("Ordner A überwachen", Theme.Body, Theme.Text, Theme.Surface);
+            lWatchB = Ui.Label("Ordner B überwachen", Theme.Body, Theme.Text, Theme.Surface);
             lWatchA.Click += delegate { if (tWatchA.Enabled) tWatchA.Checked = !tWatchA.Checked; };
             lWatchB.Click += delegate { if (tWatchB.Enabled) tWatchB.Checked = !tWatchB.Checked; };
             Label lDelay = Ui.Label("Starten nach", Theme.Body, Theme.Text, Theme.Surface);
@@ -536,6 +595,138 @@ namespace SyncPilot
             folderB.Box.TextChanged += delegate { UpdateWatchEnabled(); };
             UpdateWatchEnabled();
 
+            // --- Für Profis: Konflikte, nie löschen, Sperrdatei, Skripte ---
+            cPro = Section("Für Profis");
+            Label hConf = Ui.Label("Datei auf beiden Seiten geändert", Theme.Bold, Theme.Text, Theme.Surface);
+            Label lConfHint = Ui.WrapLabel("Mit einer Regel wird nicht mehr nachgefragt. Wurde eine Datei auf einer Seite gelöscht und auf der anderen geändert, bleibt dabei immer die geänderte Datei erhalten.",
+                Theme.Small, Theme.TextDim, Theme.Surface);
+            cbConflict = Ui.Combo();
+            cbConflict.Items.AddRange(new object[] { "Immer nachfragen (Konflikt)", "Neuere Datei gewinnt", "A gewinnt", "B gewinnt" });
+            cbConflict.SelectedIndex = Math.Max(0, Array.IndexOf(Rules, j.Conflicts));
+            cbConflict.AccessibleName = "Datei auf beiden Seiten geändert";
+
+            Label hNoDel = Ui.Label("Niemals löschen", Theme.Bold, Theme.Text, Theme.Surface);
+            tNoDelA = new ToggleSwitch();
+            tNoDelB = new ToggleSwitch();
+            tNoDelA.Checked = j.NeverDeleteA;
+            tNoDelB.Checked = j.NeverDeleteB;
+            lNoDelA = Ui.Label("In A nie etwas löschen", Theme.Body, Theme.Text, Theme.Surface);
+            lNoDelB = Ui.Label("In B nie etwas löschen", Theme.Body, Theme.Text, Theme.Surface);
+            tNoDelA.AccessibleName = lNoDelA.Text;
+            tNoDelB.AccessibleName = lNoDelB.Text;
+            lNoDelA.Click += delegate { tNoDelA.Checked = !tNoDelA.Checked; };
+            lNoDelB.Click += delegate { tNoDelB.Checked = !tNoDelB.Checked; };
+
+            Label hLock = Ui.Label("Sperrdatei", Theme.Bold, Theme.Text, Theme.Surface);
+            Label lLockHint = Ui.WrapLabel("Gegen gleichzeitigen Abgleich derselben Ordner von mehreren PCs: Solange die Datei existiert, wartet ein " +
+                "automatischer Lauf (bis 30 Minuten), ein manueller bricht ab. Älter als " + LockFiles.StaleHours + " Stunden gilt sie als verwaist.",
+                Theme.Small, Theme.TextDim, Theme.Surface);
+            lockFile = new InputBox(true, false);
+            lockFile.Text = j.LockFile ?? "";
+            lockFile.Box.AccessibleName = "Sperrdatei";
+            lockFile.Cue = "z. B. \\\\NAS\\Temp\\Sync Bilder.ini";
+            FlatButton btnLock = SmallBrowse("Sperrdatei auswählen");
+            btnLock.Click += delegate { PickFile(lockFile, "Sperrdatei (muss noch nicht existieren)", "Sync " + name.Text.Trim() + ".ini", false); };
+
+            Label hScript = Ui.Label("Befehl vor und nach dem Kopieren", Theme.Bold, Theme.Text, Theme.Surface);
+            Label lScriptHint = Ui.WrapLabel("Wird mit cmd.exe ausgeführt, die Ausgabe steht im Protokoll – z. B. net stop mysql oder ein Skript (.bat, .cmd). " +
+                "Variablen: %SYNCPILOT_A%, %SYNCPILOT_B%, %SYNCPILOT_AUFGABE%, danach %SYNCPILOT_ERGEBNIS%.",
+                Theme.Small, Theme.TextDim, Theme.Surface);
+            Label lBefore = Ui.Label("Vorher", Theme.Body, Theme.Text, Theme.Surface);
+            Label lAfter = Ui.Label("Nachher", Theme.Body, Theme.Text, Theme.Surface);
+            scriptBefore = new InputBox(true, false);
+            scriptAfter = new InputBox(true, false);
+            scriptBefore.Text = j.ScriptBefore ?? "";
+            scriptAfter.Text = j.ScriptAfter ?? "";
+            scriptBefore.Box.AccessibleName = "Befehl vor dem Kopieren";
+            scriptAfter.Box.AccessibleName = "Befehl nach dem Kopieren";
+            scriptBefore.Cue = "z. B. net stop mysql";
+            scriptAfter.Cue = "z. B. \"C:\\Skripte\\Fertig.bat\"";
+            FlatButton btnBefore = SmallBrowse("Skript für vorher auswählen");
+            FlatButton btnAfter = SmallBrowse("Skript für nachher auswählen");
+            btnBefore.Click += delegate { PickFile(scriptBefore, "Skript vor dem Kopieren", null, true); };
+            btnAfter.Click += delegate { PickFile(scriptAfter, "Skript nach dem Kopieren", null, true); };
+            tScriptsChanged = new ToggleSwitch();
+            tScriptAbort = new ToggleSwitch();
+            tScriptsChanged.Checked = j.ScriptsOnlyWithChanges;
+            tScriptAbort.Checked = j.ScriptAbortOnError;
+            Label lScriptsChanged = Ui.Label("Nur, wenn es etwas zu tun gibt", Theme.Body, Theme.Text, Theme.Surface);
+            Label lScriptAbort = Ui.Label("Nicht synchronisieren, wenn „Vorher“ einen Fehler meldet", Theme.Body, Theme.Text, Theme.Surface);
+            tScriptsChanged.AccessibleName = lScriptsChanged.Text;
+            tScriptAbort.AccessibleName = lScriptAbort.Text;
+            lScriptsChanged.Click += delegate { tScriptsChanged.Checked = !tScriptsChanged.Checked; };
+            lScriptAbort.Click += delegate { tScriptAbort.Checked = !tScriptAbort.Checked; };
+            Label lAfterHint = Ui.WrapLabel("„Nachher“ läuft auch nach Fehlern oder einem Abbruch – z. B. um einen vorher beendeten Dienst wieder zu starten. " +
+                "Befehle, die Administratorrechte brauchen (net stop), funktionieren nur, wenn Sync Pilot als Administrator läuft.",
+                Theme.Small, Theme.TextDim, Theme.Surface);
+
+            nameA.Box.TextChanged += delegate { UpdateSideLabels(); };
+            nameB.Box.TextChanged += delegate { UpdateSideLabels(); };
+            UpdateSideLabels();
+
+            cPro.Controls.AddRange(new Control[] { hConf, lConfHint, cbConflict, hNoDel, tNoDelA, lNoDelA, tNoDelB, lNoDelB,
+                hLock, lLockHint, lockFile, btnLock, hScript, lScriptHint, lBefore, scriptBefore, btnBefore, lAfter, scriptAfter, btnAfter,
+                tScriptsChanged, lScriptsChanged, tScriptAbort, lScriptAbort, lAfterHint });
+            cPro.Height = Theme.P(800);
+            cPro.Resize += delegate
+            {
+                int p = Theme.P(20), w = cPro.Width - 2 * p, g = Theme.P(8), lw = Theme.P(80);
+                int y = Theme.P(56);
+                Func<Label, int, int> wrap = delegate (Label wl, int wy)
+                {
+                    int wh = TextRenderer.MeasureText(wl.Text, wl.Font, new Size(Math.Max(10, w), 0), TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix).Height + Theme.P(4);
+                    wl.SetBounds(p, wy, w, wh);
+                    return wy + wh;
+                };
+                hConf.Location = new Point(p, y);
+                y += Theme.P(28);
+                cbConflict.SetBounds(p, y, w, cbConflict.Height);
+                y += cbConflict.Height + Theme.P(6);
+                y = wrap(lConfHint, y) + Theme.P(16);
+
+                hNoDel.Location = new Point(p, y);
+                y += Theme.P(30);
+                foreach (object[] row in new object[][] { new object[] { lNoDelA, tNoDelA }, new object[] { lNoDelB, tNoDelB } })
+                {
+                    ToggleSwitch tg = (ToggleSwitch)row[1];
+                    tg.Location = new Point(p + w - tg.Width, y + (Theme.P(36) - tg.Height) / 2);
+                    ((Label)row[0]).Location = new Point(p, y + Theme.P(8));
+                    y += Theme.P(36);
+                }
+                y += Theme.P(16);
+
+                hLock.Location = new Point(p, y);
+                y += Theme.P(28);
+                btnLock.Location = new Point(p + w - btnLock.Width, y + (lockFile.Height - btnLock.Height) / 2);
+                lockFile.SetBounds(p, y, btnLock.Left - g - p, lockFile.Height);
+                y += lockFile.Height + Theme.P(6);
+                y = wrap(lLockHint, y) + Theme.P(16);
+
+                hScript.Location = new Point(p, y);
+                y += Theme.P(28);
+                foreach (object[] row in new object[][] { new object[] { lBefore, scriptBefore, btnBefore }, new object[] { lAfter, scriptAfter, btnAfter } })
+                {
+                    InputBox box = (InputBox)row[1];
+                    FlatButton b = (FlatButton)row[2];
+                    ((Label)row[0]).Location = new Point(p, y + Theme.P(8));
+                    b.Location = new Point(p + w - b.Width, y + (box.Height - b.Height) / 2);
+                    box.SetBounds(p + lw, y, Math.Max(Theme.P(60), b.Left - g - p - lw), box.Height);
+                    y += box.Height + Theme.P(8);
+                }
+                y = wrap(lScriptHint, y) + Theme.P(8);
+                foreach (object[] row in new object[][] { new object[] { lScriptsChanged, tScriptsChanged }, new object[] { lScriptAbort, tScriptAbort } })
+                {
+                    ToggleSwitch tg = (ToggleSwitch)row[1];
+                    tg.Location = new Point(p + w - tg.Width, y + (Theme.P(36) - tg.Height) / 2);
+                    Label lab = (Label)row[0];
+                    lab.AutoSize = false;
+                    lab.SetBounds(p, y + Theme.P(8), Math.Max(10, tg.Left - p - g), Theme.P(22));
+                    y += Theme.P(36);
+                }
+                y = wrap(lAfterHint, y + Theme.P(4)) + Theme.P(20);
+                if (cPro.Height != y) { cPro.Height = y; LayoutSections(); }
+            };
+
             Controls.Add(scroll);
             Controls.Add(footer);
             scroll.BringToFront();
@@ -559,9 +750,26 @@ namespace SyncPilot
             return l;
         }
 
+        /// <summary>Richtungs-Karten so hoch wie die längste Beschreibung (mit langen Bezeichnungen drei Zeilen).</summary>
+        void LayoutModeCards()
+        {
+            if (cMode == null || mMirror == null) return;
+            int p = Theme.P(20), gap = Theme.P(10), w = (cMode.Width - 2 * p - 2 * gap) / 3, y = Theme.P(56);
+            int textW = Math.Max(10, w - 2 * Theme.P(14)), descH = 0;
+            foreach (ModeCard m in new ModeCard[] { mSync, mBackup, mMirror })
+                descH = Math.Max(descH, TextRenderer.MeasureText(m.Desc ?? "", Theme.Small, new Size(textW, 0),
+                    TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix).Height);
+            int h = Math.Max(Theme.P(124), Theme.P(72) + descH + Theme.P(14));
+            mSync.SetBounds(p, y, w, h);
+            mBackup.SetBounds(p + w + gap, y, w, h);
+            mMirror.SetBounds(p + 2 * (w + gap), y, cMode.Width - 2 * p - 2 * (w + gap), h);
+            int need = y + h + Theme.P(20);
+            if (cMode.Height != need) { cMode.Height = need; LayoutSections(); }
+        }
+
         void LayoutSections()
         {
-            if (cSched == null || cEvt == null || title == null) return;
+            if (cSched == null || cEvt == null || cPro == null || title == null) return;
             int pad = Theme.P(32), gap = Theme.P(16);
             int W = Math.Min(scroll.ClientSize.Width - 2 * pad, Theme.P(1180));
             int y0 = scroll.AutoScrollPosition.Y;
@@ -571,7 +779,7 @@ namespace SyncPilot
             {
                 int lw = (int)((W - gap) * 0.6), rw = W - gap - lw, x2 = pad + lw + gap;
                 int y = top;
-                foreach (Card c in new Card[] { cFolders, cMode, cExcl }) { c.SetBounds(pad, y, lw, c.Height); y += c.Height + gap; }
+                foreach (Card c in new Card[] { cFolders, cMode, cExcl, cPro }) { c.SetBounds(pad, y, lw, c.Height); y += c.Height + gap; }
                 int y2 = top;
                 foreach (Card c in new Card[] { cOpts, cSched, cEvt }) { c.SetBounds(x2, y2, rw, c.Height); y2 += c.Height + gap; }
                 scroll.AutoScrollMinSize = new Size(0, Math.Max(y, y2) - y0 + Theme.P(8));
@@ -579,7 +787,7 @@ namespace SyncPilot
             else
             {
                 int y = top;
-                foreach (Card c in new Card[] { cFolders, cMode, cOpts, cExcl, cSched, cEvt }) { c.SetBounds(pad, y, Math.Max(Theme.P(300), W), c.Height); y += c.Height + gap; }
+                foreach (Card c in new Card[] { cFolders, cMode, cOpts, cExcl, cSched, cEvt, cPro }) { c.SetBounds(pad, y, Math.Max(Theme.P(300), W), c.Height); y += c.Height + gap; }
                 scroll.AutoScrollMinSize = new Size(0, y - y0 + Theme.P(8));
             }
         }
@@ -590,8 +798,8 @@ namespace SyncPilot
             tDeletes.Enabled = !mirror;
             if (mirror) tDeletes.Checked = true;
             if (lDeletesDesc != null)
-                lDeletesDesc.Text = mirror ? "Beim Spiegeln wird in B immer gelöscht, was in A fehlt"
-                    : mBackup.Checked ? "In A gelöschte Dateien auch in der Sicherung B entfernen"
+                lDeletesDesc.Text = mirror ? Sd("Beim Spiegeln wird in B immer gelöscht, was in A fehlt")
+                    : mBackup.Checked ? Sd("In A gelöschte Dateien auch in der Sicherung B entfernen")
                     : "Was auf einer Seite gelöscht wurde, wird auch auf der anderen entfernt";
             LayoutSched();
         }
@@ -696,6 +904,76 @@ namespace SyncPilot
             FillTimes(Math.Min(i, times.Count - 1));
         }
 
+        /// <summary>Bezeichnungen der Ordner in den Beschriftungen und der Konfliktauswahl übernehmen.</summary>
+        void UpdateSideLabels()
+        {
+            if (cbConflict == null) return;
+            string na = nameA.Text.Trim().Length > 0 ? nameA.Text.Trim() : "A", nb = nameB.Text.Trim().Length > 0 ? nameB.Text.Trim() : "B";
+            lNoDelA.Text = "In " + na + " nie etwas löschen";
+            lNoDelB.Text = "In " + nb + " nie etwas löschen";
+            int sel = cbConflict.SelectedIndex;
+            cbConflict.Items[2] = na + " gewinnt";
+            cbConflict.Items[3] = nb + " gewinnt";
+            cbConflict.SelectedIndex = sel;
+            cbConflict.Invalidate();
+            // Überwachung, Richtungen und Löschen ebenfalls mit den Bezeichnungen
+            lWatchA.Text = SideTitle(true) + " überwachen";
+            lWatchB.Text = SideTitle(false) + " überwachen";
+            tWatchA.AccessibleName = lWatchA.Text;
+            tWatchB.AccessibleName = lWatchB.Text;
+            mBackup.Desc = Sd("Neue und geänderte Dateien von A nach B");
+            mMirror.Desc = Sd("B wird exakt wie A, auch Löschungen");
+            mBackup.Invalidate(); mMirror.Invalidate();
+            LayoutModeCards();
+            UpdateModeDependent();
+            if (cEvt != null) cEvt.PerformLayout();
+        }
+
+        /// <summary>Eigene Bezeichnung der Seite, sonst "Ordner A" bzw. "Ordner B".</summary>
+        string SideTitle(bool a)
+        {
+            string n = (a ? nameA : nameB).Text.Trim();
+            return n.Length > 0 ? n : (a ? "Ordner A" : "Ordner B");
+        }
+
+        /// <summary>A und B im Text durch die eingetragenen Bezeichnungen ersetzen (wie in Analyse und Protokoll).</summary>
+        string Sd(string text)
+        {
+            SyncJob t = new SyncJob();
+            t.NameA = nameA.Text.Trim().Length > 0 ? nameA.Text.Trim() : null;
+            t.NameB = nameB.Text.Trim().Length > 0 ? nameB.Text.Trim() : null;
+            return t.Sides(text);
+        }
+
+        /// <summary>Datei auswählen (Skript bzw. Sperrdatei) und ins Feld übernehmen; Skripte mit Leerzeichen in Anführungszeichen.</summary>
+        void PickFile(InputBox box, string title, string suggest, bool script)
+        {
+            using (FileDialog d = script ? (FileDialog)new OpenFileDialog() : new SaveFileDialog())
+            {
+                d.Title = title;
+                d.CheckPathExists = true;
+                if (script)
+                {
+                    d.Filter = "Skripte (*.bat;*.cmd;*.exe;*.ps1)|*.bat;*.cmd;*.exe;*.ps1|Alle Dateien (*.*)|*.*";
+                    d.CheckFileExists = true;
+                }
+                else
+                {
+                    d.Filter = "Alle Dateien (*.*)|*.*";
+                    d.CheckFileExists = false;
+                    ((SaveFileDialog)d).OverwritePrompt = false;
+                    d.FileName = Fmt.SafeFileName(suggest ?? "Sync.ini");
+                }
+                string cur = box.Text.Trim().Trim('"');
+                try { string dir = Path.GetDirectoryName(Paths.TryResolve(cur)); if (Directory.Exists(dir)) d.InitialDirectory = dir; } catch { }
+                if (d.ShowDialog(this) != DialogResult.OK) return;
+                string f = d.FileName;
+                if (script && f.EndsWith(".ps1", StringComparison.OrdinalIgnoreCase))
+                    box.Text = "powershell -NoProfile -ExecutionPolicy Bypass -File \"" + f + "\"";
+                else box.Text = script && f.Contains(" ") ? "\"" + f + "\"" : f;
+            }
+        }
+
         static InputBox NumberBox(int value, string accessibleName)
         {
             InputBox b = new InputBox(false, false);
@@ -762,6 +1040,25 @@ namespace SyncPilot
             }
         }
 
+        /// <summary>Im Formular A und B tauschen; beim Speichern wird der gespeicherte Stand mitgedreht.</summary>
+        void SwapForm()
+        {
+            string t = folderA.Text; folderA.Text = folderB.Text; folderB.Text = t;
+            t = devA.Key; devA.Key = devB.Key; devB.Key = t;
+            t = nameA.Text; nameA.Text = nameB.Text; nameB.Text = t;
+            t = userA; userA = userB; userB = t;
+            t = passA; passA = passB; passB = t;
+            t = certA; certA = certB; certB = t;
+            bool b = tNoDelA.Checked; tNoDelA.Checked = tNoDelB.Checked; tNoDelB.Checked = b;
+            b = tWatchA.Checked; tWatchA.Checked = tWatchB.Checked; tWatchB.Checked = b;
+            int ci = cbConflict.SelectedIndex;
+            if (ci == 2) cbConflict.SelectedIndex = 3;
+            else if (ci == 3) cbConflict.SelectedIndex = 2;
+            devA.Invalidate(); devB.Invalidate();
+            UpdateCredButtons();
+            Main.ShowNotice("A und B getauscht \u2013 wird beim Speichern übernommen", true);
+        }
+
         static void RowLayout(Label l, DeviceCombo dev, InputBox box, FlatButton browse, FlatButton cred, int p, int w, int y, int g)
         {
             int top = y + Theme.P(22);
@@ -785,7 +1082,7 @@ namespace SyncPilot
         void EditCredentials(bool sideA)
         {
             InputBox box = sideA ? folderA : folderB;
-            using (CredentialDialog d = new CredentialDialog("Anmeldung f\u00fcr Ordner " + (sideA ? "A" : "B"),
+            using (CredentialDialog d = new CredentialDialog("Anmeldung f\u00fcr " + SideTitle(sideA),
                 sideA ? userA : userB, sideA ? passA : passB, sideA ? certA : certB, delegate { return box.Text; }))
             {
                 if (d.ShowDialog(this) != DialogResult.OK) return;
@@ -844,7 +1141,7 @@ namespace SyncPilot
                     {
                         bool wp = withPath, sa = sideA;
                         string folder = (sideA ? folderA : folderB).Text.Trim();
-                        ToolStripMenuItem it = mb.Item("In Ordner " + (sideA ? "A" : "B") + " suchen …", MenuHelper.Folder,
+                        ToolStripMenuItem it = mb.Item("In " + SideTitle(sideA) + " suchen …", MenuHelper.Folder,
                             delegate { PickInto(box, dirs, wp, sa); });
                         // Auswählen geht nur in Windows-Ordnern, nicht auf FTP/SFTP-Servern
                         it.Enabled = folder.Length > 0 && !FtpUrl.IsRemote(folder);
@@ -873,7 +1170,7 @@ namespace SyncPilot
             catch (Exception ex) { MessageBox.Show(ex.Message, "Sync Pilot", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             if (!Directory.Exists(root))
             {
-                MessageBox.Show("Ordner " + (sideA ? "A" : "B") + " ist nicht erreichbar:\n" + root, "Sync Pilot", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(SideTitle(sideA) + " ist nicht erreichbar:\n" + root, "Sync Pilot", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
             List<string> picked = new List<string>();
@@ -926,10 +1223,21 @@ namespace SyncPilot
             return b;
         }
 
+        /// <summary>
+        /// Zeilen einer Liste. Leerzeilen bleiben zur Gliederung erhalten (mehrere hintereinander werden zu einer,
+        /// am Anfang und Ende entfallen sie); beim Abgleich zählen sie nicht – ebenso Zeilen mit # als Kommentar.
+        /// </summary>
         static List<string> Lines(InputBox b)
         {
-            return b.Text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
-                .Select(x => x.Trim()).Where(x => x.Length > 0).ToList();
+            List<string> r = new List<string>();
+            foreach (string raw in b.Text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n'))
+            {
+                string x = raw.Trim();
+                if (x.Length == 0 && (r.Count == 0 || r[r.Count - 1].Length == 0)) continue;
+                r.Add(x);
+            }
+            while (r.Count > 0 && r[r.Count - 1].Length == 0) r.RemoveAt(r.Count - 1);
+            return r;
         }
 
         static string SftpKeyHint(string side)
@@ -955,8 +1263,10 @@ namespace SyncPilot
             string n = name.Text.Trim();
             if (n.Length == 0) { Fail("Bitte einen Namen für die Aufgabe eingeben.", name.Box); return null; }
             foreach (SyncJob other in Main.Jobs)
-                if (other != original && string.Equals(other.Name, n, StringComparison.OrdinalIgnoreCase))
-                { Fail("Es gibt schon eine Aufgabe mit diesem Namen.", name.Box); return null; }
+                if (other != original && string.Equals(other.Name, n, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals((other.Group ?? "").Trim(), groupBox.Text.Trim(), StringComparison.OrdinalIgnoreCase))
+                { Fail(groupBox.Text.Trim().Length > 0 ? "In dieser Gruppe gibt es schon eine Aufgabe mit diesem Namen."
+                       : "Es gibt schon eine Aufgabe mit diesem Namen.", name.Box); return null; }
 
             string a, b;
             try
@@ -1009,6 +1319,9 @@ namespace SyncPilot
             SyncJob j = isNew ? new SyncJob() : original;
             bool foldersChanged = !isNew && (!string.Equals(j.FolderA, a, StringComparison.OrdinalIgnoreCase) ||
                                              !string.Equals(j.FolderB, b, StringComparison.OrdinalIgnoreCase));
+            bool swapped = foldersChanged && !string.Equals(a, b, StringComparison.OrdinalIgnoreCase) &&
+                           string.Equals(j.FolderA, b, StringComparison.OrdinalIgnoreCase) &&
+                           string.Equals(j.FolderB, a, StringComparison.OrdinalIgnoreCase);
             j.Name = n;
             j.FolderA = a;
             j.FolderB = b;
@@ -1029,6 +1342,21 @@ namespace SyncPilot
             j.UseRecycleBin = tRecycle.Checked;
             j.IncludeHidden = tHidden.Checked;
             j.CompareContent = tContent.Checked;
+            j.IgnoreDstOffset = tDst.Checked;
+            j.IncludeSubdirs = tSubdirs.Checked;
+            j.CopyRights = tRights.Checked;
+            j.KeepVersions = tVersions.Checked;
+            j.NameA = nameA.Text.Trim().Length > 0 ? nameA.Text.Trim() : null;
+            j.Group = groupBox.Text.Trim().Length > 0 ? groupBox.Text.Trim() : null;
+            j.NameB = nameB.Text.Trim().Length > 0 ? nameB.Text.Trim() : null;
+            j.Conflicts = Rules[Math.Max(0, Math.Min(Rules.Length - 1, cbConflict.SelectedIndex))];
+            j.NeverDeleteA = tNoDelA.Checked;
+            j.NeverDeleteB = tNoDelB.Checked;
+            j.LockFile = lockFile.Text.Trim().Length > 0 ? lockFile.Text.Trim().Trim('"') : null;
+            j.ScriptBefore = scriptBefore.Text.Trim().Length > 0 ? scriptBefore.Text.Trim() : null;
+            j.ScriptAfter = scriptAfter.Text.Trim().Length > 0 ? scriptAfter.Text.Trim() : null;
+            j.ScriptsOnlyWithChanges = tScriptsChanged.Checked;
+            j.ScriptAbortOnError = tScriptAbort.Checked;
             j.Excludes = new List<string>();
             j.ExcludeFiles = Lines(exFiles);
             j.ExcludeDirs = Lines(exDirs);
@@ -1053,7 +1381,13 @@ namespace SyncPilot
             j.AvailInterval = aInterval;
             j.AvailDelay = aDelay;
 
-            if (foldersChanged) StateStore.Reset(j.Id); // neues Ordnerpaar: neu anfangen, nicht nach verlorenem Stand fragen
+            if (swapped)
+            {
+                // nur getauscht: Stand mitdrehen statt neu anfangen
+                try { StateStore.Swap(j.Id); }
+                catch { StateStore.Reset(j.Id); }
+            }
+            else if (foldersChanged) StateStore.Reset(j.Id); // neues Ordnerpaar: neu anfangen, nicht nach verlorenem Stand fragen
             if (isNew) Main.Jobs.Add(j);
 
             string err = Scheduler.Apply(j);
@@ -1063,11 +1397,16 @@ namespace SyncPilot
                     "Sync Pilot", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             // Ereignisse brauchen das laufende Programm: anbieten, im Infobereich weiterzulaufen und mit Windows zu starten
             AppSettings st = AppSettings.Current;
-            if (j.HasEvents && !j.Disabled && !Demo.Active && (!st.Background || !st.Autostart))
+            if (j.HasEvents && !j.Disabled && !Demo.Active && !st.NoAskBackground && (!st.Background || !st.Autostart))
             {
-                DialogResult r = MessageBox.Show("Starten bei Ereignissen funktioniert nur, solange Sync Pilot läuft.\n\n" +
+                DialogResult r;
+                using (MsgDialog d = new MsgDialog("Starten bei Ereignissen funktioniert nur, solange Sync Pilot läuft.\n\n" +
                     "Soll Sync Pilot mit Windows starten und beim Schließen des Fensters im Infobereich weiterlaufen?",
-                    "Sync Pilot", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                    "Sync Pilot", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button1, "Nicht mehr fragen"))
+                {
+                    r = d.Map(d.ShowDialog(FindForm()));
+                    if (d.Checked) { st.NoAskBackground = true; st.Save(); }
+                }
                 if (r == DialogResult.Yes)
                 {
                     st.Background = true;

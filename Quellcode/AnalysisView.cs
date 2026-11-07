@@ -20,14 +20,16 @@ namespace SyncPilot
         readonly bool autoSync;
         readonly FlatButton btnBack, btnRe, btnSync, btnClose, btnLog, btnCancel;
         readonly Label title, status, sum1, sum2;
-        readonly Card summary, listCard;
+        readonly Card summary, listCard, errCard;
+        readonly Label errTitle, errText;
+        readonly FlatButton errRetry;
         readonly Panel pillBar, footer;
         readonly Pill[] pills;
         readonly ThemedListView list;
         readonly ProgressBar progress;
         readonly System.Windows.Forms.Timer timer;
         readonly ContextMenuStrip menu;
-        readonly ToolStripMenuItem miToB, miToA, miDelA, miDelB, miSkip, miReset, miShowA, miShowB;
+        readonly ToolStripMenuItem miToB, miToA, miDelA, miDelB, miSkip, miReset, miShowA, miShowB, miOpenA, miOpenB;
 
         Analysis an;
         string error;
@@ -67,7 +69,7 @@ namespace SyncPilot
             pillBar = new Panel();
             pillBar.BackColor = Theme.Bg;
             pillBar.Height = Theme.P(34);
-            string[] names = { "Alle", "→ Nach B", "← Nach A", "Löschen", "Konflikte & Übersprungen" };
+            string[] names = { "Alle", job.Sides("→ Nach B"), job.Sides("← Nach A"), "Löschen", "Konflikte & Übersprungen" };
             pills = new Pill[names.Length];
             for (int i = 0; i < names.Length; i++)
             {
@@ -80,11 +82,11 @@ namespace SyncPilot
             listCard = new Card();
             list = new ThemedListView();
             list.VirtualMode = true;
-            list.Columns.Add("Aktion", Theme.P(150));
+            list.Columns.Add("Aktion", ActionColumnWidth());
             list.Columns.Add("Datei", Theme.P(380));
             list.Columns.Add("Größe", Theme.P(90), HorizontalAlignment.Right);
-            list.Columns.Add("Geändert A", Theme.P(130));
-            list.Columns.Add("Geändert B", Theme.P(130));
+            list.Columns.Add(job.Sides("Geändert A"), Theme.P(130));
+            list.Columns.Add(job.Sides("Geändert B"), Theme.P(130));
             list.Columns.Add("Grund", Theme.P(180));
             list.FillColumn = 1;   // Datei bekommt die restliche Breite, keine waagrechte Bildlaufleiste
             list.FillMin = 200;
@@ -96,15 +98,18 @@ namespace SyncPilot
 
             ModernMenuBuilder mb = new ModernMenuBuilder(this);
             menu = mb.CreateMenu();
-            miToB = mb.Item("Nach B kopieren", '\uE72A', delegate { Choose(ActionKind.NachB); });
-            miToA = mb.Item("Nach A kopieren", '\uE72B', delegate { Choose(ActionKind.NachA); });
-            miDelA = mb.Item("In A l\u00f6schen", '\uE74D', delegate { Choose(ActionKind.LoeschenA); });
-            miDelB = mb.Item("In B l\u00f6schen", '\uE74D', delegate { Choose(ActionKind.LoeschenB); });
+            miToB = mb.Item(job.Sides("Nach B kopieren"), '\uE72A', delegate { Choose(ActionKind.NachB); });
+            miToA = mb.Item(job.Sides("Nach A kopieren"), '\uE72B', delegate { Choose(ActionKind.NachA); });
+            miDelA = mb.Item(job.Sides("In A l\u00f6schen"), '\uE74D', delegate { Choose(ActionKind.LoeschenA); });
+            miDelB = mb.Item(job.Sides("In B l\u00f6schen"), '\uE74D', delegate { Choose(ActionKind.LoeschenB); });
             miSkip = mb.Item("\u00dcberspringen", '\uE711', delegate { Choose(ActionKind.Keine); });
             miReset = mb.Item("Vorschlag wiederherstellen", '\uE7A7', delegate { RestoreProposal(); });
-            miShowA = mb.Item("In Ordner A anzeigen", MenuHelper.Folder, delegate { Reveal(true); });
-            miShowB = mb.Item("In Ordner B anzeigen", MenuHelper.Folder, delegate { Reveal(false); });
-            menu.Items.AddRange(new ToolStripItem[] { miToB, miToA, miDelA, miDelB, miSkip, miReset, new ToolStripSeparator(), miShowA, miShowB });
+            // Datei mit dem zugehörigen Programm öffnen (z. B. Bild anschauen, bevor man entscheidet)
+            miOpenA = mb.Item("Öffnen aus " + job.SideTitle(true), '\uE8E5', delegate { OpenFile(true); });
+            miOpenB = mb.Item("Öffnen aus " + job.SideTitle(false), '\uE8E5', delegate { OpenFile(false); });
+            miShowA = mb.Item("In " + job.SideTitle(true) + " anzeigen", MenuHelper.Folder, delegate { Reveal(true); });
+            miShowB = mb.Item("In " + job.SideTitle(false) + " anzeigen", MenuHelper.Folder, delegate { Reveal(false); });
+            menu.Items.AddRange(new ToolStripItem[] { miToB, miToA, miDelA, miDelB, miSkip, miReset, new ToolStripSeparator(), miOpenA, miOpenB, miShowA, miShowB });
             menu.Opening += MenuOpening;
             list.ContextMenuStrip = menu;
             pills[0].Checked = true;
@@ -137,7 +142,21 @@ namespace SyncPilot
             footer.Resize += delegate { LayoutFooter(); };
 
             Controls.Add(footer);
-            Controls.AddRange(new Control[] { btnBack, title, status, btnRe, summary, pillBar, listCard });
+            // Statt leerer Liste mit "0": klarer Hinweis, dass nicht analysiert werden konnte
+            errCard = new Card();
+            errCard.Visible = false;
+            errTitle = Ui.WrapLabel("", Theme.H2, Theme.Text, Theme.Surface);
+            errText = Ui.WrapLabel("", Theme.Body, Theme.TextDim, Theme.Surface);
+            errRetry = new FlatButton("Erneut versuchen", "\uE72C", BtnKind.Secondary);
+            errRetry.Click += delegate { resultMsg = null; StartAnalysis(false); };
+            errCard.Controls.AddRange(new Control[] { errTitle, errText, errRetry });
+            errCard.Paint += delegate (object s, PaintEventArgs e)
+            {
+                Theme.DrawGlyph(e.Graphics, Theme.GWarn, 20f, new Rectangle(Theme.P(28), Theme.P(26), Theme.P(32), Theme.P(32)),
+                    Theme.Err, TextFormatFlags.HorizontalCenter);
+            };
+            errCard.Resize += delegate { LayoutErr(); };
+            Controls.AddRange(new Control[] { btnBack, title, status, btnRe, summary, pillBar, listCard, errCard });
 
             timer = new System.Windows.Forms.Timer();
             timer.Interval = 120;
@@ -189,6 +208,7 @@ namespace SyncPilot
             }
             int ly = pillBar.Bottom + Theme.P(12);
             listCard.SetBounds(pad, ly, W - 2 * pad, Math.Max(Theme.P(80), H - ly - Theme.P(16)));
+            if (errCard != null) { errCard.SetBounds(pad, pillBar.Top, W - 2 * pad, errCard.Height); LayoutErr(); }
         }
 
         void LayoutFooter()
@@ -215,9 +235,9 @@ namespace SyncPilot
             int pad = Theme.P(20), W = summary.Width, H = summary.Height;
             int mid = Theme.P(150);
             int colW = (W - 2 * pad - mid) / 2;
-            DrawSide(g, "ORDNER A", Devices.Glyph(job.DeviceA, job.FolderA), job.FolderA, an == null ? null : an.FilesA.ToString("N0") + " Dateien · " + Fmt.Size(an.BytesA),
+            DrawSide(g, job.SideTitle(true).ToUpper(), Devices.Glyph(job.DeviceA, job.FolderA), job.FolderA, an == null ? null : an.FilesA.ToString("N0") + " Dateien · " + Fmt.Size(an.BytesA),
                 new Rectangle(pad, 0, colW, H), TextFormatFlags.Left);
-            DrawSide(g, "ORDNER B", Devices.Glyph(job.DeviceB, job.FolderB), job.FolderB, an == null ? null : an.FilesB.ToString("N0") + " Dateien · " + Fmt.Size(an.BytesB),
+            DrawSide(g, job.SideTitle(false).ToUpper(), Devices.Glyph(job.DeviceB, job.FolderB), job.FolderB, an == null ? null : an.FilesB.ToString("N0") + " Dateien · " + Fmt.Size(an.BytesB),
                 new Rectangle(W - pad - colW, 0, colW, H), TextFormatFlags.Right);
             Rectangle c = new Rectangle(pad + colW, Theme.P(14), mid, Theme.P(36));
             Theme.DrawGlyph(g, job.Mode == SyncMode.Abgleichen ? Theme.GSwitch : Theme.GForward, 18f, c, Theme.Accent, TextFormatFlags.HorizontalCenter);
@@ -251,7 +271,7 @@ namespace SyncPilot
             string size = it.IsDir ? "Ordner" : Fmt.Size((it.A ?? it.B).Size);
             e.Item = new ListViewItem(new string[]
             {
-                Engine.ActionText(it.Chosen, it.IsDir),
+                job.Sides(Engine.ActionText(it.Chosen, it.IsDir)),
                 it.IsDir ? it.Rel + "\\" : it.Rel,
                 size,
                 Time(it.A),
@@ -259,7 +279,7 @@ namespace SyncPilot
                 showingResult && it.Done ? "\u2713 Erledigt"
                 : showingResult && it.Failed ? "Fehler: " + (it.Error ?? "unbekannt")
                 : showingResult && (it.IsCopy || it.IsDelete || it.IsRename) ? "Nicht ausgeführt (abgebrochen)"
-                : it.Chosen != it.Proposed ? "Geändert von dir (Vorschlag: " + Engine.ActionText(it.Proposed, it.IsDir) + ")" : it.Reason
+                : it.Chosen != it.Proposed ? "Geändert von dir (Vorschlag: " + job.Sides(Engine.ActionText(it.Proposed, it.IsDir)) + ")" : job.Sides(it.Reason)
             });
         }
 
@@ -268,6 +288,20 @@ namespace SyncPilot
             if (e == null) return "—";
             if (e.IsDir) return "";
             return e.Mtime.ToLocalTime().ToString("dd.MM.yy HH:mm");
+        }
+
+        /// <summary>
+        /// Spalte "Aktion" so breit wie die längste mögliche Plakette (mit den Bezeichnungen der Seiten,
+        /// z. B. "→ Nach Webserver"), damit sie nicht abgeschnitten wird.
+        /// </summary>
+        int ActionColumnWidth()
+        {
+            int w = Theme.P(150);
+            using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
+                foreach (ActionKind k in Enum.GetValues(typeof(ActionKind)))
+                    foreach (bool dir in new[] { false, true })
+                        w = Math.Max(w, Theme.ChipWidth(g, job.Sides(Engine.ActionText(k, dir)), Theme.Small) + Theme.P(24));
+            return Math.Min(w, Theme.P(320));
         }
 
         static void ChipColors(ActionKind k, out Color fg, out Color bg)
@@ -293,7 +327,14 @@ namespace SyncPilot
             {
                 Color fg, cbg;
                 ChipColors(it.Chosen, out fg, out cbg);
-                Theme.Chip(e.Graphics, e.SubItem.Text, Theme.Small, e.Bounds.X + Theme.P(10), e.Bounds.Y + e.Bounds.Height / 2, fg, cbg);
+                // nie über die Spalte hinaus malen (sonst je nach Maus mal ganz, mal abgeschnitten); zu lang: mit "…" kürzen
+                string t = e.SubItem.Text;
+                int max = e.Bounds.Width - Theme.P(16);
+                while (t.Length > 4 && Theme.ChipWidth(e.Graphics, t, Theme.Small) > max) t = t.Substring(0, t.Length - 2).TrimEnd() + "…";
+                Region clip = e.Graphics.Clip;
+                e.Graphics.SetClip(e.Bounds);
+                Theme.Chip(e.Graphics, t, Theme.Small, e.Bounds.X + Theme.P(10), e.Bounds.Y + e.Bounds.Height / 2, fg, cbg);
+                e.Graphics.Clip = clip;
                 return true;
             }
             if (e.ColumnIndex == 1)
@@ -350,6 +391,8 @@ namespace SyncPilot
             miSkip.Enabled = true;
             miReset.Enabled = sel.Any(x => x.Chosen != x.Proposed);
             miShowA.Enabled = sel.Count == 1 && sel[0].A != null && !FtpUrl.IsRemote(job.FolderA);
+            miOpenA.Enabled = sel.Count == 1 && sel[0].A != null && !sel[0].IsDir && !FtpUrl.IsRemote(job.FolderA);
+            miOpenB.Enabled = sel.Count == 1 && sel[0].B != null && !sel[0].IsDir && !FtpUrl.IsRemote(job.FolderB);
             miShowB.Enabled = sel.Count == 1 && sel[0].B != null && !FtpUrl.IsRemote(job.FolderB);
         }
 
@@ -373,6 +416,22 @@ namespace SyncPilot
             List<PlanItem> sel = Selected();
             if (sel.Count != 1) return;
             Ui.Explore(Path.Combine(Paths.TryResolve(sideA ? job.FolderA : job.FolderB), sel[0].Rel), true);
+        }
+
+        void OpenFile(bool sideA)
+        {
+            List<PlanItem> sel = Selected();
+            if (sel.Count != 1) return;
+            PlanItem it = sel[0];
+            FileEntry e = sideA ? it.A : it.B;
+            string rel = e != null && !string.IsNullOrEmpty(e.Rel) ? e.Rel : it.Rel;
+            string p = Path.Combine(Paths.TryResolve(sideA ? job.FolderA : job.FolderB), rel);
+            if (!File.Exists(p))
+            {
+                MessageBox.Show("Die Datei gibt es dort nicht mehr:\n" + p, "Sync Pilot", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            Ui.Open(p);
         }
 
         void ShowSelected()
@@ -412,6 +471,28 @@ namespace SyncPilot
             else if (progress.Style != ProgressBarStyle.Marquee) progress.Style = ProgressBarStyle.Marquee;
         }
 
+        void LayoutErr()
+        {
+            if (errCard == null) return;
+            int x0 = Theme.P(76), w = Math.Max(Theme.P(100), errCard.Width - x0 - Theme.P(28));
+            int hh = TextRenderer.MeasureText(errTitle.Text, Theme.H2, new Size(w, 0), TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix).Height + Theme.P(2);
+            errTitle.SetBounds(x0, Theme.P(28), w, hh);
+            int th = TextRenderer.MeasureText(errText.Text, Theme.Body, new Size(w, 0), TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix).Height + Theme.P(4);
+            errText.SetBounds(x0, errTitle.Bottom + Theme.P(8), w, th);
+            errRetry.Location = new Point(x0, errText.Bottom + Theme.P(16));
+            int need = errRetry.Bottom + Theme.P(28);
+            if (errCard.Height != need) errCard.Height = need;
+        }
+
+        /// <summary>"Ordner A/B" in Meldungen durch die Bezeichnungen ersetzen (z. B. "Laptop nicht erreichbar").</summary>
+        string SideNames(string msg)
+        {
+            if (msg == null) return "";
+            if (!string.IsNullOrWhiteSpace(job.NameA)) msg = msg.Replace("Ordner A", job.NameA.Trim());
+            if (!string.IsNullOrWhiteSpace(job.NameB)) msg = msg.Replace("Ordner B", job.NameB.Trim());
+            return msg;
+        }
+
         void UpdateUi()
         {
             btnRe.Enabled = !busy;
@@ -423,7 +504,9 @@ namespace SyncPilot
             btnCancel.Visible = busy;
             progress.Visible = busy;
             sum2.Visible = !busy;
-            btnSync.Enabled = an != null && an.CountActive > 0 && !showingResult;
+            btnSync.Enabled = an != null && (an.CountActive > 0 || job.ScriptsAlways) && !showingResult;
+            string st = an != null && an.CountActive == 0 && job.ScriptsAlways ? "Skripte ausführen" : "Jetzt synchronisieren";
+            if (btnSync.Text != st) { btnSync.Text = st; btnSync.FitWidth(); PerformLayout(); }
 
             if (busy) { summary.Invalidate(); return; }
 
@@ -434,6 +517,7 @@ namespace SyncPilot
                 pills[2].Count = an.Actions.Count(x => x.Chosen == ActionKind.NachA);
                 pills[3].Count = an.Actions.Count(x => x.IsDelete);
                 pills[4].Count = an.Actions.Count(x => x.Chosen == ActionKind.Konflikt || x.Chosen == ActionKind.Keine);
+                pills[4].Alert = an.Actions.Any(x => x.Chosen == ActionKind.Konflikt) ? 1 : 0;
             }
             else foreach (Pill p in pills) p.Count = 0;
             PerformLayout();
@@ -463,14 +547,32 @@ namespace SyncPilot
             else if (an.CountActive == 0)
             {
                 sum1.Text = an.CountUnknown > 0 ? "Bitte entscheiden: neu oder gelöscht?" :
-                    an.Actions.Count == 0 ? "Alles aktuell – nichts zu tun" : "Keine Aktionen ausgewählt";
-                sum2.Text = Hints();
+                    an.Actions.Count == 0 ? (job.ScriptsAlways ? "Alles aktuell – die Skripte laufen trotzdem" : "Alles aktuell – nichts zu tun")
+                    : "Keine Aktionen ausgewählt";
+                sum2.Text = job.ScriptsAlways && an.CountUnknown == 0
+                    ? "„Skripte ausführen“ startet die Befehle vor/nach dem Kopieren (Option „nur bei Änderungen“ ist aus)."
+                    : Hints();
             }
             else
             {
                 sum1.Text = an.CountActive.ToString("N0") + (an.CountActive == 1 ? " Aktion" : " Aktionen") +
                             " · " + Fmt.Size(an.TransferBytes) + " werden übertragen";
                 sum2.Text = Hints();
+            }
+            // Fehler vor der Analyse: keine leere Liste mit "0" zeigen (sieht aus wie "alles aktuell")
+            bool failed = error != null && an == null && !busy;
+            if (errCard != null && (errCard.Visible != failed || failed))
+            {
+                pillBar.Visible = listCard.Visible = !failed;
+                errCard.Visible = failed;
+                if (failed)
+                {
+                    errTitle.Text = "Nicht analysiert \u2013 nichts wurde verglichen oder geändert";
+                    errText.Text = SideNames(error) + "\n\nIst der Rechner bzw. das Laufwerk eingeschaltet und im Netz? " +
+                        "Bei Freigaben: Stimmt der Pfad (z. B. \\\\Rechner\\Freigabe) und ist die Anmeldung hinterlegt?";
+                    LayoutErr();
+                    errCard.Invalidate();
+                }
             }
             summary.Invalidate();
         }
@@ -489,7 +591,7 @@ namespace SyncPilot
             }
             else if (an.StateNote != null) parts.Add(an.StateNote);
             if (ren > 0) parts.Add(ren.ToString("N0") + (ren == 1 ? " Umbenennung" : " Umbenennungen") + " ohne erneutes Übertragen");
-            if (del > 0) parts.Add(del.ToString("N0") + " Löschungen " + (RecycleAll() ? "(in den Papierkorb)" : "(endgültig)"));
+            if (del > 0) parts.Add(del.ToString("N0") + (del == 1 ? " Löschung " : " Löschungen ") + (RecycleAll() ? "(in den Papierkorb)" : "(endgültig)"));
             if (con > 0) parts.Add(con.ToString("N0") + " Konflikte werden übersprungen – Rechtsklick zum Entscheiden");
             if (skip > 0) parts.Add(skip.ToString("N0") + " übersprungen");
             if (parts.Count == 0) return "Rechtsklick auf Einträge, um die Aktion zu ändern";
@@ -523,7 +625,11 @@ namespace SyncPilot
             {
                 Analysis result = null;
                 Exception err = null;
-                try { result = Engine.Analyze(job, delegate { return cancel; }, delegate (string s) { liveStatus = s; }); }
+                try
+                {
+                    result = Engine.Analyze(job, delegate { return cancel; }, delegate (string s) { liveStatus = s; });
+                    Runner.RecordUpToDate(result);
+                }
                 catch (Exception ex) { err = ex; }
                 Ui_(delegate { AnalysisDone(result, err, thenSync); });
             });
@@ -545,7 +651,7 @@ namespace SyncPilot
 
             if (thenSync && an != null)
             {
-                if (an.CountActive == 0) { }
+                if (an.CountActive == 0 && !(job.ScriptsAlways && an.CountUnknown == 0)) { }
                 else if (an.CountConflicts > 0)
                     status.Text = "Es gibt Konflikte. Bitte prüfen (Rechtsklick) und dann synchronisieren.";
                 else if (Engine.SafetyCheck(an) != null)
@@ -563,7 +669,7 @@ namespace SyncPilot
 
         void StartSync(bool ask)
         {
-            if (busy || an == null || an.CountActive == 0) return;
+            if (busy || an == null || (an.CountActive == 0 && !job.ScriptsAlways)) return;
             string warn = Engine.SafetyCheck(an);
             if (warn != null)
             {

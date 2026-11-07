@@ -29,6 +29,8 @@ namespace SyncPilot
         public DateTime Mtime;
         /// <summary>Genauigkeit der Zeit in Sekunden (0 = genau; FTP-Server ohne MLSD liefern nur Minuten bzw. Tage).</summary>
         public int Precision;
+        /// <summary>Gespeicherter Stand im alten Format: Schreibweise auf dieser Seite nicht bekannt.</summary>
+        public bool CaseUnknown;
     }
 
     /// <summary>UmbenennenA/B: Datei oder Ordner auf der Seite A bzw. B umbenennen/verschieben (statt löschen und neu kopieren).</summary>
@@ -51,6 +53,8 @@ namespace SyncPilot
         public ActionKind Proposed;
         public ActionKind Chosen;
         public string Reason = "";
+        /// <summary>"Niemals löschen" für Seite A bzw. B (Löschen lässt sich dann auch per Rechtsklick nicht wählen).</summary>
+        public bool NoDeleteA, NoDeleteB;
         public bool Unreadable;
         public bool Done;
         public bool Failed;
@@ -64,6 +68,8 @@ namespace SyncPilot
         public PlanItem Mover;
         /// <summary>Vorschlag ohne Umbenennung – gilt, wenn statt Umbenennen kopiert wird.</summary>
         public ActionKind Before;
+        /// <summary>Nur Groß-/Kleinschreibung des Namens angleichen (From = bisheriger Pfad, Rel = neue Schreibweise).</summary>
+        public bool CaseOnly;
 
         public bool IsDelete { get { return Chosen == ActionKind.LoeschenA || Chosen == ActionKind.LoeschenB; } }
         public bool IsRename { get { return Chosen == ActionKind.UmbenennenA || Chosen == ActionKind.UmbenennenB; } }
@@ -88,8 +94,8 @@ namespace SyncPilot
             {
                 case ActionKind.NachB: return A != null;
                 case ActionKind.NachA: return B != null;
-                case ActionKind.LoeschenA: return A != null;
-                case ActionKind.LoeschenB: return B != null;
+                case ActionKind.LoeschenA: return A != null && !NoDeleteA;
+                case ActionKind.LoeschenB: return B != null && !NoDeleteB;
                 case ActionKind.UmbenennenA:
                 case ActionKind.UmbenennenB: return From != null && Proposed == k;
                 default: return true;
@@ -142,7 +148,7 @@ namespace SyncPilot
         {
             job.Upgrade();
             exFiles = Rules(job.ExcludeFiles);
-            exDirs = Rules(job.ExcludeDirs.Concat(AlwaysDirs));
+            exDirs = Rules(job.ExcludeDirs.Concat(AlwaysDirs).Concat(job.IncludeSubdirs ? new string[0] : new[] { "*" }));
             inFiles = Rules(job.IncludeFiles);
             inDirs = Rules(job.IncludeDirs);
         }
@@ -182,6 +188,8 @@ namespace SyncPilot
         /// <summary>Negativliste: beim Einlesen überspringen (bei Ordnern samt Inhalt).</summary>
         public bool Excluded(string rel, string name, bool isDir)
         {
+            // Ordner mit älteren Versionen gehört nicht zum Abgleich (auch wenn die Option ausgeschaltet wurde)
+            if (isDir && string.Equals(rel, Engine.VersionsDir, StringComparison.OrdinalIgnoreCase)) return true;
             return Match(isDir ? exDirs : exFiles, rel, name);
         }
 
@@ -234,7 +242,8 @@ namespace SyncPilot
 
     /// <summary>
     /// Stand des letzten Abgleichs je Aufgabe: für jeden Pfad Größe und Zeit auf Seite A und auf Seite B.
-    /// Zeilen: "D\tpfad", "F2\tpfad\tgrößeA\tzeitA\tgrößeB\tzeitB" (ältere Form "F\tpfad\tgröße\tzeit" gilt für beide Seiten).
+    /// Zeilen: "D\tpfad\tpfadB", "F2\tpfad\tgrößeA\tzeitA\tgrößeB\tzeitB\tpfadB" (pfadB = Schreibweise in B, leer = wie in A;
+    /// fehlt bei älteren Ständen). Ältere Form "F\tpfad\tgröße\tzeit" gilt für beide Seiten.
     /// </summary>
     /// <summary>Wie der gespeicherte Stand einer Aufgabe gelesen werden konnte.</summary>
     public enum StateLoad { Ok, Missing, Backup, Lost }
@@ -321,15 +330,20 @@ namespace SyncPilot
                     count++;
                     if (p.Length >= 2 && p[0] == "D")
                     {
+                        // ab 1.31: dritte Spalte = Schreibweise in B, falls anders als in A
                         FileEntry e = new FileEntry { Rel = p[1], IsDir = true };
-                        r[p[1]] = new FileEntry[] { e, e };
+                        FileEntry eb = p.Length >= 3 && p[2].Length > 0 ? new FileEntry { Rel = p[2], IsDir = true }
+                                                                        : new FileEntry { Rel = p[1], IsDir = true, CaseUnknown = p.Length < 3 };
+                        r[p[1]] = new FileEntry[] { e, eb };
                     }
                     else if (p.Length >= 2 && p[0] == "?") ask.Add(p[1]);
                     else if (p.Length >= 6 && p[0] == "F2")
                     {
                         long sa = L(p[2]), ta = L(p[3]), sb = L(p[4]), tb = L(p[5]);
                         if (sa < 0 || ta < 0 || sb < 0 || tb < 0) { if (v2) return false; continue; }
-                        r[p[1]] = new FileEntry[] { F(p[1], sa, ta), F(p[1], sb, tb) };
+                        FileEntry fb = F(p.Length >= 7 && p[6].Length > 0 ? p[6] : p[1], sb, tb);
+                        if (p.Length < 7) fb.CaseUnknown = true; // altes Format: Schreibweise in B nicht gespeichert
+                        r[p[1]] = new FileEntry[] { F(p[1], sa, ta), fb };
                     }
                     else if (p.Length >= 4 && p[0] == "F")
                     {
@@ -361,9 +375,11 @@ namespace SyncPilot
                 w.WriteLine(Header);
                 foreach (FileEntry[] e in entries)
                 {
-                    if (e[0].IsDir) w.WriteLine("D\t" + e[0].Rel);
+                    // Schreibweise in B nur, wenn sie von A abweicht (ältere Versionen lesen die Zeile weiterhin)
+                    string relB = e[1].Rel != null && !string.Equals(e[1].Rel, e[0].Rel, StringComparison.Ordinal) ? e[1].Rel : "";
+                    if (e[0].IsDir) w.WriteLine("D\t" + e[0].Rel + "\t" + relB);
                     else w.WriteLine("F2\t" + e[0].Rel + "\t" + e[0].Size.ToString(ci) + "\t" + e[0].Mtime.Ticks.ToString(ci) +
-                                     "\t" + e[1].Size.ToString(ci) + "\t" + e[1].Mtime.Ticks.ToString(ci));
+                                     "\t" + e[1].Size.ToString(ci) + "\t" + e[1].Mtime.Ticks.ToString(ci) + "\t" + relB);
                     count++;
                 }
                 if (ask != null)
@@ -394,6 +410,17 @@ namespace SyncPilot
         }
 
         /// <summary>Ordner geändert: neu anfangen (leerer Stand, damit nicht nach einem verlorenen Stand gefragt wird).</summary>
+        /// <summary>Quelle und Ziel getauscht: Stand je Datei mit vertauschten Seiten weiterführen (nichts gilt als neu).</summary>
+        public static void Swap(string id)
+        {
+            StateLoad st;
+            HashSet<string> ask;
+            Dictionary<string, FileEntry[]> cur = Load(id, out st, out ask);
+            List<FileEntry[]> swapped = new List<FileEntry[]>();
+            foreach (FileEntry[] e in cur.Values) swapped.Add(new FileEntry[] { e[1], e[0] });
+            Save(id, swapped, ask);
+        }
+
         public static void Reset(string id)
         {
             Delete(id);
@@ -528,13 +555,15 @@ namespace SyncPilot
         {
             Stopwatch sw = Stopwatch.StartNew();
             status("Verbinde \u2026");
+            LockFiles.CheckFree(job);
+            ignoreDst = job.IgnoreDstOffset;
             job = Prepare(job);
             using (IFileSide sa = Sides.Open(job, true))
             using (IFileSide sb = Sides.Open(job, false))
             {
-                status("Verbinde mit Ordner A \u2026");
+                status("Verbinde mit " + job.SideTitle(true) + " \u2026");
                 sa.CheckRoot();
-                status("Verbinde mit Ordner B \u2026");
+                status("Verbinde mit " + job.SideTitle(false) + " \u2026");
                 sb.CheckRoot();
                 Matcher m = new Matcher(job);
                 Analysis an = new Analysis();
@@ -613,8 +642,11 @@ namespace SyncPilot
                     an.All.Add(it);
                 }
 
+                ApplyConflictRule(job, an.All);
+                ApplyNeverDelete(job, an.All);
                 FixDirDeletes(an.All);
                 DetectRenames(job, an.All, sa, sb);
+                DetectCaseRenames(job, an.All);
                 foreach (PlanItem p in an.All) p.Chosen = p.Proposed;
                 an.Actions = an.All.Where(x => x.Proposed != ActionKind.Keine).ToList();
                 an.Seconds = sw.Elapsed.TotalSeconds;
@@ -638,6 +670,36 @@ namespace SyncPilot
             {
                 a.Remove(k);
                 b.Remove(k);
+            }
+        }
+
+        // ---------- Nur Groß-/Kleinschreibung geändert ----------
+
+        /// <summary>
+        /// Windows (und damit der Abgleich) unterscheidet Groß-/Kleinschreibung nicht: "fotos" und "Fotos" sind derselbe Eintrag.
+        /// Unterscheidet sich nur die Schreibweise des Namens, wird sie auf der anderen Seite angeglichen. Welche Seite geändert
+        /// wurde, zeigt der gespeicherte Stand; sonst (bzw. bei Sichern/Spiegeln immer) gilt die Schreibweise von A.
+        /// </summary>
+        static void DetectCaseRenames(SyncJob job, List<PlanItem> all)
+        {
+            foreach (PlanItem it in all)
+            {
+                if (it.A == null || it.B == null || it.Proposed != ActionKind.Keine || it.Unreadable || it.A.IsDir != it.B.IsDir) continue;
+                string na = NameOf(it.A.Rel), nb = NameOf(it.B.Rel);
+                if (string.Equals(na, nb, StringComparison.Ordinal) || !string.Equals(na, nb, StringComparison.OrdinalIgnoreCase)) continue;
+                bool changedA = it.LastA != null && !it.LastA.CaseUnknown && !string.Equals(NameOf(it.LastA.Rel), na, StringComparison.Ordinal);
+                bool changedB = it.LastB != null && !it.LastB.CaseUnknown && !string.Equals(NameOf(it.LastB.Rel), nb, StringComparison.Ordinal);
+                bool toB;
+                string reason;
+                if (job.Mode != SyncMode.Abgleichen) { toB = true; reason = "Schreibweise wie in A"; }
+                else if (changedA && !changedB) { toB = true; reason = "Schreibweise in A ge\u00e4ndert"; }
+                else if (changedB && !changedA) { toB = false; reason = "Schreibweise in B ge\u00e4ndert"; }
+                else { toB = true; reason = "Schreibweise unterschiedlich \u2013 wie in A"; }
+                it.CaseOnly = true;
+                it.From = toB ? it.B.Rel : it.A.Rel;
+                it.Rel = ParentOf(it.From).Length > 0 ? ParentOf(it.From) + "\\" + (toB ? na : nb) : (toB ? na : nb);
+                Set(it, toB ? ActionKind.UmbenennenB : ActionKind.UmbenennenA,
+                    reason + " (" + (toB ? nb : na) + " \u2192 " + (toB ? na : nb) + ")");
             }
         }
 
@@ -867,10 +929,22 @@ namespace SyncPilot
             it.Reason = reason;
         }
 
+        /// <summary>Sommerzeit-Versatz für die Analyse in diesem Thread (siehe SyncJob.IgnoreDstOffset).</summary>
+        [ThreadStatic] static bool ignoreDst;
+
+        /// <summary>Unterschied von genau einer Stunde (± Toleranz): typisch für FAT-Laufwerke und manche NAS nach der Zeitumstellung.</summary>
+        static bool DstOffset(double seconds, int tol)
+        {
+            return ignoreDst && Math.Abs(Math.Abs(seconds) - 3600) <= tol;
+        }
+
         static bool Changed(FileEntry cur, FileEntry last)
         {
             if (last == null) return true;
-            return cur.Size != last.Size || Math.Abs((cur.Mtime - last.Mtime).TotalSeconds) > Math.Max(2, cur.Precision);
+            if (cur.Size != last.Size) return true;
+            double d = (cur.Mtime - last.Mtime).TotalSeconds;
+            int tol = Math.Max(2, cur.Precision);
+            return Math.Abs(d) > tol && !DstOffset(d, tol);
         }
 
         /// <summary>Beide Seiten seit dem letzten Abgleich unverändert (dann gelten sie als gleich).</summary>
@@ -886,7 +960,8 @@ namespace SyncPilot
             if (a.Size != b.Size) return false;
             if (BothUnchanged(it)) return true;
             int tol = Math.Max(2, Math.Max(a.Precision, b.Precision));
-            if (Math.Abs((a.Mtime - b.Mtime).TotalSeconds) <= tol) return true;
+            double d = (a.Mtime - b.Mtime).TotalSeconds;
+            if (Math.Abs(d) <= tol || DstOffset(d, tol)) return true;
             if (job.CompareContent)
             {
                 try { return ContentEqual(sa, sb, it.Rel); }
@@ -1046,6 +1121,52 @@ namespace SyncPilot
             }
         }
 
+        /// <summary>
+        /// Konfliktregel der Aufgabe: automatisch entscheiden statt fragen. Wurde eine Datei auf einer Seite gelöscht und auf der
+        /// anderen geändert, bleibt immer die geänderte Datei erhalten. Nicht angewendet bei unklarem Stand (verlorener Stand),
+        /// bei Datei und Ordner mit gleichem Namen und bei Ordnern.
+        /// </summary>
+        static void ApplyConflictRule(SyncJob job, List<PlanItem> all)
+        {
+            if (job.Conflicts == ConflictRule.Fragen) return;
+            string rule = job.Conflicts == ConflictRule.Neuer ? "neuere Datei gewinnt"
+                        : job.Conflicts == ConflictRule.AGewinnt ? "A gewinnt" : "B gewinnt";
+            bool backup = job.Mode == SyncMode.Sichern;
+            foreach (PlanItem it in all)
+            {
+                if (it.Proposed != ActionKind.Konflikt || it.Unknown || it.Unreadable || it.IsDir) continue;
+                if (it.A != null && it.B != null && it.A.IsDir != it.B.IsDir) continue;
+                string why = it.Reason + " – Regel: " + rule;
+                if (it.A == null || it.B == null)
+                {
+                    // gelöscht gegen geändert: die geänderte Datei auf die andere Seite bringen
+                    if (it.A != null) Set(it, ActionKind.NachB, why);
+                    else if (!backup) Set(it, ActionKind.NachA, why);
+                    continue;
+                }
+                double d = (it.A.Mtime - it.B.Mtime).TotalSeconds;
+                ActionKind k;
+                if (job.Conflicts == ConflictRule.AGewinnt) k = ActionKind.NachB;
+                else if (job.Conflicts == ConflictRule.BGewinnt) k = backup ? ActionKind.Keine : ActionKind.NachA;
+                else if (d > 2) k = ActionKind.NachB;
+                else if (d < -2) k = backup ? ActionKind.Keine : ActionKind.NachA;
+                else continue; // gleich alt: weiter fragen
+                Set(it, k, why);
+            }
+        }
+
+        /// <summary>"Niemals löschen": vorgeschlagenes Löschen auf der gesperrten Seite überspringen.</summary>
+        static void ApplyNeverDelete(SyncJob job, List<PlanItem> all)
+        {
+            foreach (PlanItem it in all)
+            {
+                it.NoDeleteA = job.NeverDeleteA;
+                it.NoDeleteB = job.NeverDeleteB;
+                if (it.Proposed == ActionKind.LoeschenA && job.NeverDeleteA) Set(it, ActionKind.Keine, "Nicht gelöscht – in A wird nie gelöscht");
+                else if (it.Proposed == ActionKind.LoeschenB && job.NeverDeleteB) Set(it, ActionKind.Keine, "Nicht gelöscht – in B wird nie gelöscht");
+            }
+        }
+
         // Ein Ordner, der noch Dateien enthaelt, die bleiben, wird nicht geloescht, sondern angelegt.
         static void FixDirDeletes(List<PlanItem> all)
         {
@@ -1132,16 +1253,19 @@ namespace SyncPilot
                     else if (x.Chosen == ActionKind.Konflikt)
                     {
                         r.Conflicts++;
-                        log.Line("Konflikt, \u00fcbersprungen (" + x.Reason + "): " + x.Rel);
+                        log.Line("Konflikt, \u00fcbersprungen (" + job.Sides(x.Reason) + "): " + x.Rel);
                     }
                 }
 
                 List<PlanItem> mkdirs = work.Where(x => x.IsDir && x.IsCopy).OrderBy(x => x.Rel.Length).ToList();
-                List<PlanItem> renames = work.Where(x => x.IsRename).OrderBy(x => x.IsDir ? 0 : 1).ThenBy(x => x.Rel.Length).ToList();
+                // nur Schreibweise: zuerst und von innen nach außen (so stimmen die bisherigen Pfade noch, auch bei FTP/SFTP)
+                List<PlanItem> caseRenames = work.Where(x => x.IsRename && x.CaseOnly).OrderByDescending(x => x.From.Length).ToList();
+                List<PlanItem> renames = work.Where(x => x.IsRename && !x.CaseOnly).OrderBy(x => x.IsDir ? 0 : 1).ThenBy(x => x.Rel.Length).ToList();
                 List<PlanItem> copies = work.Where(x => !x.IsDir && x.IsCopy).ToList();
                 List<PlanItem> delFiles = work.Where(x => !x.IsDir && x.IsDelete).ToList();
                 List<PlanItem> delDirs = work.Where(x => x.IsDir && x.IsDelete).OrderByDescending(x => x.Rel.Length).ToList();
                 List<PlanItem> order = new List<PlanItem>();
+                order.AddRange(caseRenames);
                 order.AddRange(mkdirs);
                 order.AddRange(renames); // vor dem Löschen: die alten Ordner werden dadurch leer
                 order.AddRange(copies);
@@ -1185,14 +1309,23 @@ namespace SyncPilot
                 {
                     bool toB = it.Chosen == ActionKind.NachB;
                     IFileSide src = toB ? sa : sb, dst = toB ? sb : sa;
-                    string dir = toB ? "A \u2192 B" : "B \u2192 A";
+                    string dir = job.Sides(toB ? "A \u2192 B" : "B \u2192 A");
                     if (it.IsDir)
                     {
                         dst.CreateDir(it.Rel);
                         log.Line("Ordner angelegt (" + dir + "): " + it.Rel);
+                        if (job.CopyRights) Rights.Copy(src, dst, it.Rel, true, log);
                         return;
                     }
+                    // Datei wird überschrieben: bisherige Fassung vorher aufbewahren
+                    if (job.KeepVersions && (toB ? it.B : it.A) != null)
+                    {
+                        string ver = VersionPath(it.Rel);
+                        dst.Move(it.Rel, ver, false);
+                        log.Line("Bisherige Fassung aufbewahrt (" + job.SideName(!toB) + "): " + ver);
+                    }
                     FileEntry res = dst.WriteFile(it.Rel, src, toB ? it.A : it.B);
+                    if (job.CopyRights) Rights.Copy(src, dst, it.Rel, false, log);
                     if (toB) it.ResultB = res; else it.ResultA = res;
                     r.Copied++;
                     r.Bytes += it.TransferSize;
@@ -1203,7 +1336,17 @@ namespace SyncPilot
                 case ActionKind.UmbenennenB:
                 {
                     IFileSide side = it.Chosen == ActionKind.UmbenennenA ? sa : sb;
-                    string label = it.Chosen == ActionKind.UmbenennenA ? "A" : "B";
+                    string label = job.SideName(it.Chosen == ActionKind.UmbenennenA);
+                    if (it.CaseOnly)
+                    {
+                        // über einen Zwischennamen – Windows übernimmt "fotos" -> "Fotos" sonst nicht
+                        string tmp = (ParentOf(it.From).Length > 0 ? ParentOf(it.From) + "\\" : "") + "~sp" + Guid.NewGuid().ToString("N").Substring(0, 8);
+                        side.Move(it.From, tmp, it.IsDir);
+                        side.Move(tmp, it.Rel, it.IsDir);
+                        r.Moved++;
+                        log.Line("Schreibweise angeglichen (" + label + "): " + it.From + " \u2192 " + NameOf(it.Rel));
+                        return;
+                    }
                     side.Move(it.From, it.Rel, it.IsDir);
                     r.Moved++;
                     log.Line((it.IsDir ? "Ordner umbenannt/verschoben (" : "Umbenannt/verschoben (") + label + "): " +
@@ -1214,7 +1357,7 @@ namespace SyncPilot
                 case ActionKind.LoeschenB:
                 {
                     IFileSide side = it.Chosen == ActionKind.LoeschenA ? sa : sb;
-                    string label = it.Chosen == ActionKind.LoeschenA ? "A" : "B";
+                    string label = job.SideName(it.Chosen == ActionKind.LoeschenA);
                     if (it.IsDir)
                     {
                         string how = side.DeleteDir(it.Rel, job.UseRecycleBin);
@@ -1222,7 +1365,16 @@ namespace SyncPilot
                         else log.Line("Ordner gel\u00f6scht (" + label + ", " + how + "): " + it.Rel);
                         return;
                     }
-                    string h = side.DeleteFile(it.Rel, job.UseRecycleBin);
+                    string h;
+                    if (job.KeepVersions)
+                    {
+                        // statt Löschen in den Versionen-Ordner dieser Seite verschieben
+                        string ver = VersionPath(it.Rel);
+                        try { side.Move(it.Rel, ver, false); h = "aufbewahrt unter " + ver; }
+                        catch (FileNotFoundException) { h = null; }
+                        catch (DirectoryNotFoundException) { h = null; }
+                    }
+                    else h = side.DeleteFile(it.Rel, job.UseRecycleBin);
                     if (h == null)
                     {
                         log.Line("Schon nicht mehr vorhanden (" + label + "): " + it.Rel);
@@ -1233,6 +1385,19 @@ namespace SyncPilot
                     return;
                 }
             }
+        }
+
+        /// <summary>Ordner für ältere Versionen im Startordner jeder Seite (wird nie abgeglichen).</summary>
+        public const string VersionsDir = "_Sync Pilot Versionen";
+
+        /// <summary>Pfad der aufbewahrten Fassung: _Sync Pilot Versionen\Unterordner\Name (2026-11-06 22-10-05).ext</summary>
+        static string VersionPath(string rel)
+        {
+            string dir = ParentOf(rel), name = NameOf(rel);
+            string ext = Path.GetExtension(name), stem = ext.Length > 0 && ext.Length < name.Length ? name.Substring(0, name.Length - ext.Length) : name;
+            if (stem.Length == name.Length) ext = "";
+            string file = stem + " (" + DateTime.Now.ToString("yyyy-MM-dd HH-mm-ss") + ")" + ext;
+            return dir.Length == 0 ? VersionsDir + "\\" + file : VersionsDir + "\\" + dir + "\\" + file;
         }
 
         // Neuen Stand merken, damit beim naechsten Lauf Loeschungen und Aenderungen erkannt werden.
@@ -1248,6 +1413,14 @@ namespace SyncPilot
                 {
                     FileEntry[] mp = MovedPair(it, it.Mover.Chosen);
                     if (mp != null) list.Add(mp);
+                    continue;
+                }
+                if (it.CaseOnly)
+                {
+                    // angeglichen: beide Seiten mit der neuen Schreibweise; übersprungen: so, wie sie jetzt sind
+                    if (it.Done && it.Chosen == ActionKind.UmbenennenB) list.Add(new FileEntry[] { it.A, Repath(it.B, it.Rel) });
+                    else if (it.Done && it.Chosen == ActionKind.UmbenennenA) list.Add(new FileEntry[] { Repath(it.A, it.Rel), it.B });
+                    else list.Add(new FileEntry[] { it.A, it.B });
                     continue;
                 }
                 if (it.IsRename && it.Done)
@@ -1304,6 +1477,8 @@ namespace SyncPilot
             SyncJob job = an.Job;
             HistoryEntry h = NewEntry(job, scheduled);
             Stopwatch sw = Stopwatch.StartNew();
+            bool scriptsRan = false;
+            string scriptError = null;
             using (Logger log = new Logger(job.Name))
             {
                 h.LogFile = log.FilePath;
@@ -1317,23 +1492,76 @@ namespace SyncPilot
                     catch (AbandonedMutexException) { own = true; }
                     if (!own) throw new SyncException("Diese Aufgabe läuft bereits.");
 
-                    ExecResult r = Engine.Execute(an, cancel, progress, log);
-                    Engine.SaveState(an);
-                    h.Copied = r.Copied;
-                    h.Moved = r.Moved;
-                    h.Deleted = r.Deleted;
-                    h.Errors = r.Errors;
-                    h.Skipped = r.Skipped;
-                    h.Conflicts = r.Conflicts;
-                    h.Bytes = r.Bytes;
-                    h.Cancelled = r.Cancelled;
-                    h.Result = ResultText(h);
-                    int unknown = an.CountUnknown;
-                    if (unknown > 0 && h.Errors == 0 && !h.Cancelled)
-                        h.Result = "Stand fehlte – " + unknown.ToString("N0") + (unknown == 1 ? " Eintrag wartet" : " Einträge warten") + " auf Entscheidung";
-                    log.Line("Ergebnis: " + h.Copied + " kopiert, " + (h.Moved > 0 ? h.Moved + " umbenannt/verschoben, " : "") +
-                             h.Deleted + " gelöscht, " + h.Conflicts +
-                             " Konflikte, " + h.Skipped + " übersprungen, " + h.Errors + " Fehler");
+                    // Sperrdatei (gegen gleichzeitigen Abgleich von einem anderen PC); bei Run() schon vor der Analyse geholt
+                    using (LockFiles lk = LockFiles.Acquire(job, false, 0, cancel, null, log))
+                    {
+                        bool scripts = !job.ScriptsOnlyWithChanges || an.CountActive > 0;
+                        bool before = scripts && !string.IsNullOrWhiteSpace(job.ScriptBefore);
+                        bool after = scripts && !string.IsNullOrWhiteSpace(job.ScriptAfter);
+                        if (before)
+                        {
+                            scriptsRan = true;
+                            int rc = Scripts.Run(job.ScriptBefore, job, "vor dem Kopieren", "", cancel, log,
+                                delegate (string l) { if (progress != null) progress(0, 0, "Skript vor dem Kopieren: " + l); });
+                            if (cancel()) throw new OperationCanceledException();
+                            if (rc != 0 && job.ScriptAbortOnError)
+                                throw new SyncException("Das Skript vor dem Kopieren meldet einen Fehler (Rückgabewert " + rc + ") – nicht synchronisiert.");
+                            if (rc != 0) scriptError = "Skript vor dem Kopieren: Rückgabewert " + rc;
+                        }
+                        string afterResult = "Fehler";
+                        try
+                        {
+                            // Das Skript davor kann Dateien ändern (z. B. Zertifikate löschen, Datenbank sichern):
+                            // dann neu einlesen, damit nicht nach einem veralteten Plan kopiert wird
+                            if (before) Reanalyze(an, cancel, progress, log);
+                            ExecResult r = Engine.Execute(an, cancel, progress, log);
+                            Engine.SaveState(an);
+                            h.Copied = r.Copied;
+                            h.Moved = r.Moved;
+                            h.Deleted = r.Deleted;
+                            h.Errors = r.Errors;
+                            h.Skipped = r.Skipped;
+                            h.Conflicts = r.Conflicts;
+                            h.Bytes = r.Bytes;
+                            h.Cancelled = r.Cancelled;
+                            h.Result = ResultText(h);
+                            int unknown = an.CountUnknown;
+                            if (unknown > 0 && h.Errors == 0 && !h.Cancelled)
+                                h.Result = "Stand fehlte – " + unknown.ToString("N0") + (unknown == 1 ? " Eintrag wartet" : " Einträge warten") + " auf Entscheidung";
+                            log.Line("Ergebnis: " + h.Copied + " kopiert, " + (h.Moved > 0 ? h.Moved + " umbenannt/verschoben, " : "") +
+                                     h.Deleted + " gelöscht, " + h.Conflicts +
+                                     " Konflikte, " + h.Skipped + " übersprungen, " + h.Errors + " Fehler");
+                            afterResult = h.Result;
+                        }
+                        finally
+                        {
+                            // auch nach Fehler oder Abbruch (z. B. um einen vorher beendeten Dienst wieder zu starten)
+                            if (after)
+                            {
+                                scriptsRan = true;
+                                // läuft auch nach einem Abbruch; "Abbrechen" während des Skripts beendet es aber
+                                bool cancelledBefore = cancel();
+                                if (progress != null) progress(0, 0, "Skript nach dem Kopieren läuft …");
+                                int rc2 = Scripts.Run(job.ScriptAfter, job, "nach dem Kopieren", afterResult,
+                                    delegate { return !cancelledBefore && cancel(); }, log,
+                                    delegate (string l) { if (progress != null) progress(0, 0, "Skript nach dem Kopieren: " + l); });
+                                if (rc2 != 0) scriptError = (scriptError != null ? scriptError + " · " : "") + "Skript nach dem Kopieren: Rückgabewert " + rc2;
+                            }
+                            // Ein Skriptfehler ist ein Fehler des Laufs: roter Status, Hinweis im Infobereich, Protokoll bleibt
+                            if (scriptError != null && !h.Cancelled)
+                            {
+                                h.Errors++;
+                                h.Result = "Fehler: " + scriptError + (h.Copied + h.Moved + h.Deleted > 0 ? " (" + ResultText(h) + ")" : "");
+                                log.Line("FEHLER: " + scriptError);
+                            }
+                        }
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    h.Cancelled = true;
+                    h.Result = "Abgebrochen";
+                    log.Line("Vom Benutzer abgebrochen.");
                 }
                 catch (Exception ex)
                 {
@@ -1353,7 +1581,7 @@ namespace SyncPilot
             h.Seconds = sw.Elapsed.TotalSeconds + an.Seconds;
             // automatischer Lauf ohne Änderungen, Fehler und Warnungen: kein Protokoll (der Verlauf genügt)
             if (scheduled && !h.Cancelled && h.Errors == 0 && h.Copied == 0 && h.Moved == 0 && h.Deleted == 0 &&
-                h.Skipped == 0 && h.Conflicts == 0 && an.ScanErrors.Count == 0 && an.StateNote == null)
+                h.Skipped == 0 && h.Conflicts == 0 && an.ScanErrors.Count == 0 && an.StateNote == null && !scriptsRan)
             {
                 try { File.Delete(h.LogFile); h.LogFile = null; } catch { }
             }
@@ -1380,19 +1608,28 @@ namespace SyncPilot
 
         public static HistoryEntry Run(SyncJob job, bool scheduled, Func<bool> cancel, Action<string> status)
         {
-            Analysis an;
+            // Sperrdatei schon vor der Analyse holen (sonst könnte sich zwischen Analyse und Kopieren etwas ändern);
+            // automatische Läufe warten bis zu 30 Minuten, manuelle brechen sofort ab
+            LockFiles lk;
+            try { lk = LockFiles.Acquire(job, scheduled, 30, cancel, status, null); }
+            catch (Exception ex) { return Fail(job, scheduled, ex is OperationCanceledException ? null : ex.Message); }
             try
             {
-                an = Engine.Analyze(job, cancel, status);
+                Analysis an;
+                try
+                {
+                    an = Engine.Analyze(job, cancel, status);
+                }
+                catch (Exception ex)
+                {
+                    return Fail(job, scheduled, ex is OperationCanceledException ? null : ex.Message);
+                }
+                string warn = Engine.SafetyCheck(an);
+                if (warn != null) return Fail(job, scheduled, "Sicherheitsstopp: " + warn);
+                return ExecuteAnalysis(an, scheduled, cancel,
+                    delegate (int i, int n, string t) { status(n == 0 && !string.IsNullOrEmpty(t) ? job.Name + ": " + t : "Synchronisiere " + job.Name + " … " + i + " / " + n); });
             }
-            catch (Exception ex)
-            {
-                return Fail(job, scheduled, ex is OperationCanceledException ? null : ex.Message);
-            }
-            string warn = Engine.SafetyCheck(an);
-            if (warn != null) return Fail(job, scheduled, "Sicherheitsstopp: " + warn);
-            return ExecuteAnalysis(an, scheduled, cancel,
-                delegate (int i, int n, string t) { status("Synchronisiere " + job.Name + " … " + i + " / " + n); });
+            finally { if (lk != null) lk.Dispose(); }
         }
 
         // Fuer unerwartete Ausnahmen (z. B. Protokoll nicht schreibbar): nie den Prozess beenden.
@@ -1437,6 +1674,60 @@ namespace SyncPilot
             return h;
         }
 
+        /// <summary>
+        /// Nach dem Skript vor dem Kopieren beide Seiten neu einlesen und den Plan ersetzen. Von Hand geänderte
+        /// Aktionen (Rechtsklick) bleiben erhalten, wenn sich am Eintrag nichts geändert hat. Löst die neue Analyse
+        /// den Sicherheitsstopp aus (z. B. viele Löschungen), wird nicht synchronisiert.
+        /// </summary>
+        static void Reanalyze(Analysis an, Func<bool> cancel, Action<int, int, string> progress, Logger log)
+        {
+            if (progress != null) progress(0, 0, "Lese nach dem Skript neu ein \u2026");
+            Analysis fresh = Engine.Analyze(an.Job, cancel, delegate (string st) { if (progress != null) progress(0, 0, st); });
+            Dictionary<string, PlanItem> manual = new Dictionary<string, PlanItem>(StringComparer.OrdinalIgnoreCase);
+            foreach (PlanItem o in an.All) if (o.Chosen != o.Proposed) manual[o.Rel] = o;
+            foreach (PlanItem it in fresh.All)
+            {
+                PlanItem o;
+                if (manual.TryGetValue(it.Rel, out o) && o.Proposed == it.Proposed && it.CanChoose(o.Chosen)) it.Chosen = o.Chosen;
+            }
+            int before = an.Actions.Count(x => x.Chosen != ActionKind.Keine && x.Chosen != ActionKind.Konflikt);
+            int after = fresh.Actions.Count(x => x.Chosen != ActionKind.Keine && x.Chosen != ActionKind.Konflikt);
+            bool wasSafe = Engine.SafetyCheck(an) == null;
+            an.All = fresh.All;
+            an.Actions = fresh.Actions;
+            an.ScanErrors = fresh.ScanErrors;
+            an.FilesA = fresh.FilesA; an.FilesB = fresh.FilesB;
+            an.BytesA = fresh.BytesA; an.BytesB = fresh.BytesB;
+            an.StateLost = fresh.StateLost;
+            an.StateNote = fresh.StateNote;
+            an.Seconds += fresh.Seconds;
+            log.Line("Nach dem Skript neu eingelesen: " + after + (after == 1 ? " Aktion" : " Aktionen") +
+                     (after != before ? " (vorher " + before + ")" : ""));
+            string warn = Engine.SafetyCheck(an);
+            if (warn != null && wasSafe) throw new SyncException("Sicherheitsstopp nach dem Skript: " + warn);
+        }
+
+        /// <summary>
+        /// Analyse ohne jeden Unterschied: zählt wie ein Lauf ohne Änderungen. Der Stand wird gespeichert (sonst gälte
+        /// später eine auf einer Seite gelöschte Datei als "neu auf der anderen" und käme zurück) und der Verlauf
+        /// zeigt "Alles aktuell" statt "Noch nie ausgeführt". Ohne Protokoll und ohne Skripte.
+        /// </summary>
+        public static void RecordUpToDate(Analysis an)
+        {
+            try
+            {
+                if (an == null || an.Actions.Count > 0 || an.ScanErrors.Count > 0 || an.StateNote != null) return;
+                SyncJob job = an.Job;
+                if (IsRunning(job.Id)) return;
+                Engine.SaveState(an);
+                HistoryEntry h = NewEntry(job, false);
+                h.Result = "Alles aktuell";
+                h.Seconds = an.Seconds;
+                Store.AddHistory(h);
+            }
+            catch { } // nur Komfort – die Analyse selbst ist gültig
+        }
+
         static HistoryEntry NewEntry(SyncJob job, bool scheduled)
         {
             HistoryEntry h = new HistoryEntry();
@@ -1451,9 +1742,10 @@ namespace SyncPilot
         {
             SyncJob job = an.Job;
             log.Line("Sync Pilot " + Version + " – Aufgabe: " + job.Name);
-            log.Line("A: " + job.FolderA + "  (" + an.FilesA.ToString("N0") + " Dateien, " + Fmt.Size(an.BytesA) + ")");
-            log.Line("B: " + job.FolderB + "  (" + an.FilesB.ToString("N0") + " Dateien, " + Fmt.Size(an.BytesB) + ")");
-            log.Line("Modus: " + job.ModeText + (job.UseRecycleBin ? ", Löschen in den Papierkorb" : ", endgültig löschen"));
+            log.Line(job.SideName(true) + ": " + job.FolderA + "  (" + an.FilesA.ToString("N0") + " Dateien, " + Fmt.Size(an.BytesA) + ")");
+            log.Line(job.SideName(false) + ": " + job.FolderB + "  (" + an.FilesB.ToString("N0") + " Dateien, " + Fmt.Size(an.BytesB) + ")");
+            log.Line("Modus: " + job.ModeText + (job.IncludeSubdirs ? "" : ", ohne Unterordner") +
+                     (job.UseRecycleBin ? ", Löschen in den Papierkorb" : ", endgültig löschen"));
             foreach (string e in an.ScanErrors) log.Line("Warnung: " + e);
             if (an.StateNote != null) log.Line("Hinweis: " + an.StateNote + (an.StateLost ? " Nur auf einer Seite vorhandene Einträge werden nicht kopiert, sondern als Frage gezeigt." : ""));
         }

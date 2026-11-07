@@ -4,10 +4,12 @@
 Erstellen.log
 Quellcode/VersionInfo.cs
 
-# Sicherungen und Entwürfe
+# Sicherungen, Entwürfe und Originaldaten (z. B. easy2sync.sdb mit privaten Pfaden)
 Backup/
 Bin/
 Design/
+Original/
+*.sdb
 
 # Laufzeitdaten (Aufgaben, Stände und Protokolle liegen ohnehin unter %LOCALAPPDATA%)
 *.ini

@@ -477,7 +477,7 @@ namespace SyncPilot
 
         // Kopf: Programm-Icon, Name, Versions-Plakette (Klick oeffnet das Info-Fenster)
         /// <summary>Kurze Erklärung unter dem Programmnamen (wie in den anderen Programmen).</summary>
-        public const string Subtitle = "Ordner abgleichen, sichern und spiegeln – lokal, im Netzwerk, per FTP und SFTP";
+        public const string Subtitle = "Ordner abgleichen, sichern und spiegeln";
 
         // Einheitlicher Kopf (Globale Richtlinien, Vorlage Wake on LAN): Icon links, daneben Name und Erklärung als Block
         // mittig zum Icon; Versions-Pille 12 × Skalierung rechts neben dem Namen (wie Wake on LAN), senkrecht mittig zum Namen
@@ -506,14 +506,15 @@ namespace SyncPilot
                 TextRenderer.DrawText(g, "Sync Pilot", fTitle, new Point(tx, top), Theme.Text, flags);
                 TextRenderer.DrawText(g, Subtitle, fSub, new Point(tx + (int)(1 * k), top + ts.Height + gap), Theme.TextDim, flags);
 
-                // Versions-Plakette nach globaler Vorgabe (Referenz WindowGrid 1.32 / Wake on LAN): 6 neben dem Namen,
-                // Höhe 21, Schrift 10,5 px, Innenabstand je 8, senkrecht mittig zum Namen; Klick öffnet das Info-Fenster
+                // Versions-Plakette nach globaler Vorgabe (Referenz Wake on LAN ab 1.42, HeaderPanel): 12 neben dem Namen
+                // (Textende, NoPadding), Höhe 21, Schrift 10,5 px, Innenabstand je 8, senkrecht mittig zum Namen;
+                // Farben wie die Referenz (14 % bzw. 38 % Akzentfarbe); Klick öffnet das Info-Fenster
                 string v = "Version " + AppInfo.Version;
                 Size vs = TextRenderer.MeasureText(g, v, fPill, Size.Empty, flags);
                 int ph = (int)Math.Round(21 * k), pw = vs.Width + (int)Math.Round(16 * k);
-                Rectangle r = new Rectangle(tx + ts.Width + (int)Math.Round(6 * k), top + (ts.Height - ph) / 2, pw, ph);
+                Rectangle r = new Rectangle(tx + ts.Width + (int)Math.Round(12 * k), top + (ts.Height - ph) / 2, pw, ph);
                 pill = r;
-                Color fill = Theme.AccentSoft, border = Theme.Blend(Theme.AccentSoft, Theme.Accent, 0.30f);
+                Color fill = AccentColors.Mix(Theme.Accent, Theme.Bg, 0.14), border = AccentColors.Mix(Theme.Accent, Theme.Bg, 0.38);
                 using (GraphicsPath p = Shapes.Rounded(new RectangleF(r.X + 0.5f, r.Y + 0.5f, r.Width - 1, r.Height - 1), (r.Height - 1) / 2f))
                 {
                     using (SolidBrush b = new SolidBrush(pillHover ? border : fill)) g.FillPath(b, p);

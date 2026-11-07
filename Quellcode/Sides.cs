@@ -77,8 +77,51 @@ namespace SyncPilot
 
         public void CheckRoot()
         {
-            if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
-                throw new SyncException("Ordner " + label + " nicht gefunden: " + root);
+            if (string.IsNullOrEmpty(root)) throw new SyncException("Ordner " + label + " ist nicht angegeben.");
+            if (Directory.Exists(root)) return;
+            // Directory.Exists sagt nur "nein" – den eigentlichen Grund ermitteln (Rechner aus, Freigabe fehlt, kein Zugriff, Unterordner fehlt)
+            string why = Diagnose(root);
+            throw new SyncException("Ordner " + label + " nicht erreichbar: " + root + (why != null ? " \u2013 " + why : ""));
+        }
+
+        static string Diagnose(string path)
+        {
+            try
+            {
+                Directory.GetFileSystemEntries(path);
+                return null;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return "kein Zugriff. Bei Freigaben unter „Anmeldung“ Benutzer und Kennwort hinterlegen.";
+            }
+            catch (DirectoryNotFoundException)
+            {
+                // tiefsten vorhandenen Oberordner suchen: "„Bilder“ fehlt in \\Rechner\Daten"
+                try
+                {
+                    string p = path.TrimEnd('\\');
+                    while (true)
+                    {
+                        string parent = Path.GetDirectoryName(p);
+                        if (string.IsNullOrEmpty(parent)) break;
+                        if (Directory.Exists(parent)) return "„" + Path.GetFileName(p) + "“ gibt es in " + parent + " nicht.";
+                        p = parent.TrimEnd('\\');
+                    }
+                }
+                catch { }
+                return path.StartsWith("\\\\") ? "die Freigabe gibt es so nicht (Name prüfen, z. B. in der Netzwerkumgebung)." : "Laufwerk bzw. Ordner nicht vorhanden.";
+            }
+            catch (IOException ex)
+            {
+                // z. B. "Der Netzwerkpfad wurde nicht gefunden" (Rechner aus/nicht im Netz) oder
+                // "Der Netzwerkname wurde nicht gefunden" (Freigabe gibt es nicht)
+                return ex.Message.Trim().TrimEnd('.') + ".";
+            }
+            catch (Exception ex)
+            {
+                return ex.Message.Trim();
+            }
         }
 
         // "unreadable" sammelt alles, was auf dieser Seite nicht sicher gesehen werden konnte

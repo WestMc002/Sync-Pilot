@@ -180,6 +180,35 @@ namespace SyncPilot
         }
     }
 
+    /// <summary>
+    /// Bildlauf-Bereich, der beim Anklicken eines Felds nicht springt: WinForms scrollt sonst beim ersten Fokus
+    /// das ganze Steuerelement (bzw. seine Karte) in den Sichtbereich und malt dabei doppelt. Mit der Tastatur
+    /// (Tab) wird weiterhin dorthin geblättert.
+    /// </summary>
+    public class ScrollPanel : Panel
+    {
+        public ScrollPanel()
+        {
+            SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
+        }
+
+        protected override Point ScrollToControl(Control activeControl)
+        {
+            // Ist das Feld (auch nur teilweise) zu sehen – also z. B. gerade angeklickt –, nicht blättern.
+            // Nur wenn es ganz außerhalb liegt (Tab-Taste), wie gewohnt dorthin blättern.
+            try
+            {
+                if (activeControl != null && activeControl.IsHandleCreated)
+                {
+                    Rectangle r = RectangleToClient(activeControl.RectangleToScreen(activeControl.ClientRectangle));
+                    if (r.IntersectsWith(ClientRectangle)) return DisplayRectangle.Location;
+                }
+            }
+            catch { }
+            return base.ScrollToControl(activeControl);
+        }
+    }
+
     public class ModeCard : RadioButton
     {
         public string Glyph, Title, Desc;
@@ -232,6 +261,14 @@ namespace SyncPilot
         {
             get { return count; }
             set { count = value; FitWidth(); Invalidate(); }
+        }
+
+        int alert;
+        /// <summary>Zähler einfärben, solange er nicht 0 ist: 0 = normal, 1 = orange (Konflikte), 2 = rot (Fehler).</summary>
+        public int Alert
+        {
+            get { return alert; }
+            set { if (alert != value) { alert = value; Invalidate(); } }
         }
 
         public Pill(string text) : this(text, true) { }
@@ -291,8 +328,16 @@ namespace SyncPilot
             string c = count.ToString("N0");
             int cw = TextRenderer.MeasureText(g, c, Theme.Small, Size.Empty, TextFormatFlags.NoPadding).Width + Theme.P(12);
             Rectangle br = new Rectangle(x + tw + Theme.P(8), Height / 2 - Theme.P(9), cw, Theme.P(18));
-            Theme.FillRound(g, br, Theme.P(9), Checked ? Theme.Blend(Theme.Accent, Theme.AccentText, 0.25f) : Theme.NeutralBg);
-            Theme.DrawText(g, c, Theme.Small, br, Checked ? Theme.AccentText : Theme.Text, TextFormatFlags.HorizontalCenter);
+            Color bbg = Checked ? Theme.Blend(Theme.Accent, Theme.AccentText, 0.25f) : Theme.NeutralBg;
+            Color bfg = Checked ? Theme.AccentText : Theme.Text;
+            if (count > 0 && alert > 0)
+            {
+                // Fehler rot, Konflikte orange – auch bei ausgewähltem Filter gut zu sehen
+                bbg = alert >= 2 ? Theme.Err : Theme.Warn;
+                bfg = Theme.Bg; // hell: weiß auf Orange/Rot, dunkel: dunkel auf hellem Gelb/Rot – beides gut lesbar
+            }
+            Theme.FillRound(g, br, Theme.P(9), bbg);
+            Theme.DrawText(g, c, Theme.Small, br, bfg, TextFormatFlags.HorizontalCenter);
             if (Focused && ShowFocusCues)
                 Theme.DrawRound(g, new Rectangle(2, 2, Width - 5, Height - 5), rad - 2, Checked ? Theme.AccentText : Theme.Text, 1f);
         }
@@ -334,6 +379,13 @@ namespace SyncPilot
             Box.ForeColor = Theme.Text;
             Box.Font = mono ? Theme.Mono : Theme.Body;
             Box.Multiline = multiline;
+            // Cascadia Mono: Unterlängen (g, y, p) ragen über die automatische Zeilenhöhe des Textfelds hinaus und wurden
+            // abgeschnitten – Höhe selbst setzen (Schrifthöhe + etwas Luft)
+            if (mono && !multiline)
+            {
+                Box.AutoSize = false;
+                Box.Height = TextRenderer.MeasureText("Agjpqy|", Box.Font).Height + Theme.P(3);
+            }
             if (multiline)
             {
                 Box.ScrollBars = ScrollBars.Vertical;

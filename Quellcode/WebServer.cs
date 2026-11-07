@@ -674,6 +674,76 @@ namespace SyncPilot
     }
 
     /// <summary>Analyse und Abgleich, die über die Webseite gestartet wurden (je Aufgabe ein Zustand).</summary>
+    /// <summary>
+    /// "Gruppe synchronisieren" vom Handy: die aktiven Aufgaben einer Gruppe nacheinander, wie "Alle synchronisieren"
+    /// am PC (Konflikte werden übersprungen, bei auffällig vielen Löschungen wird eine Aufgabe nicht ausgeführt).
+    /// </summary>
+    public static class GroupRun
+    {
+        static readonly object Gate = new object();
+        static string group, status = "", result;
+        static bool busy, resultBad;
+        public static volatile bool Cancel;
+
+        public static Dictionary<string, object> Info()
+        {
+            lock (Gate)
+            {
+                Dictionary<string, object> d = new Dictionary<string, object>();
+                d["busy"] = busy;
+                d["group"] = group ?? "";
+                d["status"] = busy ? status : (result ?? "");
+                d["bad"] = resultBad;
+                return d;
+            }
+        }
+
+        public static string Start(string g)
+        {
+            g = (g ?? "").Trim();
+            List<SyncJob> jobs = Store.LoadJobs().Where(j => !j.Disabled &&
+                string.Equals((j.Group ?? "").Trim(), g, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (jobs.Count == 0) return "In dieser Gruppe gibt es keine aktive Aufgabe.";
+            lock (Gate)
+            {
+                if (busy) return "Es läuft schon eine Gruppe (" + group + ").";
+                busy = true;
+                group = g.Length == 0 ? "Ohne Gruppe" : g;
+                status = "Starte …";
+                result = null;
+                Cancel = false;
+            }
+            Thread t = new Thread(delegate ()
+            {
+                int ok = 0, bad = 0, n = 0;
+                foreach (SyncJob j in jobs)
+                {
+                    if (Cancel) break;
+                    n++;
+                    string prefix = "(" + n + "/" + jobs.Count + ") " + j.Name + ": ";
+                    lock (Gate) status = prefix + "…";
+                    HistoryEntry h;
+                    try
+                    {
+                        h = Runner.Run(j, false, delegate { return Cancel; },
+                            delegate (string s) { lock (Gate) status = prefix + s; });
+                    }
+                    catch (Exception ex) { h = Runner.Crash(j, false, ex); }
+                    if (h != null && h.IsOk) ok++; else bad++;
+                }
+                lock (Gate)
+                {
+                    busy = false;
+                    resultBad = bad > 0;
+                    result = (Cancel ? "Abgebrochen. " : "Fertig. ") + ok + " ohne Fehler, " + bad + " mit Fehlern oder Hinweisen.";
+                }
+            });
+            t.IsBackground = true;
+            t.Start();
+            return null;
+        }
+    }
+
     public class RemoteRun
     {
         public string JobId;
@@ -741,6 +811,7 @@ namespace SyncPilot
                 try
                 {
                     an = Engine.Analyze(job, delegate { return Cancel; }, delegate (string s) { Status = s; });
+                    Runner.RecordUpToDate(an);
                 }
                 catch (Exception ex)
                 {
@@ -761,7 +832,8 @@ namespace SyncPilot
                     Phase = "bereit";
                     Status = "Analyse abgeschlossen · " + Fmt.Duration(an.Seconds);
                     Version++;
-                    sync = thenSync && an.CountActive > 0 && an.CountConflicts == 0 && Engine.SafetyCheck(an) == null;
+                    sync = thenSync && (an.CountActive > 0 || (job.ScriptsAlways && an.CountUnknown == 0)) &&
+                           an.CountConflicts == 0 && Engine.SafetyCheck(an) == null;
                     if (thenSync && !sync && an.CountActive > 0)
                         Status = an.CountConflicts > 0 ? "Es gibt Konflikte – bitte prüfen und dann synchronisieren."
                                                        : "Ungewöhnlich viele Löschungen – bitte prüfen.";
@@ -857,6 +929,20 @@ namespace SyncPilot
             if (rq.Method == "GET" && path == "/api/state") return State();
             if (rq.Method == "GET" && path == "/api/history") return History();
             if (rq.Method == "GET" && path.StartsWith("/api/log/")) return Log(Uri.UnescapeDataString(path.Substring(9)));
+
+            if (rq.Method == "POST" && path == "/api/group/sync")
+            {
+                object g;
+                ParseBody(rq).TryGetValue("group", out g);
+                string err = GroupRun.Start(g as string ?? "");
+                if (err != null) return WebResponse_.Error(409, err);
+                return WebResponse_.Json(GroupRun.Info());
+            }
+            if (rq.Method == "POST" && path == "/api/group/cancel")
+            {
+                GroupRun.Cancel = true;
+                return WebResponse_.Json(GroupRun.Info());
+            }
 
             if (path.StartsWith("/api/jobs/"))
             {
@@ -1004,6 +1090,14 @@ namespace SyncPilot
                 d["last"] = h == null ? "Noch nie" : Fmt.When(h.Start);
                 d["busy"] = run != null && run.Busy;
                 d["phase"] = run == null ? "leer" : run.Phase;
+                d["running"] = Runner.IsRunning(j.Id); // z. B. Zeitplan, PC oder Gruppe
+                d["group"] = string.IsNullOrWhiteSpace(j.Group) ? "" : j.Group.Trim();
+                d["sched"] = j.Schedule != ScheduleKind.Manuell || j.HasEvents;
+                d["disabled"] = j.Disabled;
+                d["lastTs"] = h == null ? 0 : (long)(h.Start.ToUniversalTime() - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalMilliseconds;
+                d["nameA"] = j.ShortSide(true);   // eigene Bezeichnung oder kurzer Name aus dem Pfad
+                d["nameB"] = j.ShortSide(false);
+                d["named"] = true;
                 list.Add(d);
             }
             Dictionary<string, object> r = new Dictionary<string, object>();
@@ -1011,6 +1105,7 @@ namespace SyncPilot
             r["pc"] = Environment.MachineName; // Info: "Verbunden mit"
             r["year"] = DateTime.Now.Year;
             r["jobs"] = list;
+            r["groupRun"] = GroupRun.Info();
             return WebResponse_.Json(r);
         }
 
@@ -1038,6 +1133,8 @@ namespace SyncPilot
                 r["a"] = job.FolderA;
                 r["b"] = job.FolderB;
                 r["modeText"] = job.ModeText;
+                r["nameA"] = job.SideName(true);
+                r["nameB"] = job.SideName(false);
                 Analysis an = run.An;
                 if (an != null && run.Phase != "analyse")
                 {
@@ -1061,13 +1158,15 @@ namespace SyncPilot
                         d["dir"] = it.IsDir;
                         d["chosen"] = it.Chosen.ToString();
                         d["proposed"] = it.Proposed.ToString();
-                        d["label"] = Engine.ActionText(it.Chosen, it.IsDir);
-                        d["reason"] = it.Reason;
+                        d["label"] = an.Job.Sides(Engine.ActionText(it.Chosen, it.IsDir));
+                        d["reason"] = an.Job.Sides(it.Reason);
                         d["size"] = it.IsDir ? "Ordner" : Fmt.Size((it.A ?? it.B).Size);
                         d["ta"] = Time(it.A);
                         d["tb"] = Time(it.B);
                         d["hasA"] = it.A != null;
                         d["hasB"] = it.B != null;
+                        d["noDelA"] = it.NoDeleteA;
+                        d["noDelB"] = it.NoDeleteB;
                         items.Add(d);
                     }
                     r["items"] = items;

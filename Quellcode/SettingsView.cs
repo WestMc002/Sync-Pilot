@@ -7,6 +7,8 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
+using System.Linq;
+using System.Text;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Windows.Forms;
@@ -22,8 +24,9 @@ namespace SyncPilot
     {
         readonly Panel scroll;
         readonly Label title;
-        readonly Card cBack, cExplorer, cLogs, cPhone, cTls, cNet, cOpen;
-        readonly ChoiceBox cbLogDays;
+        readonly Card cBack, cExplorer, cLogs, cPhone, cTls, cNet, cOpen, cImport;
+        readonly ChoiceBox cbLogDays, cbAfterAll;
+        static readonly string[] AfterAllKeys = { "Nichts", "Herunterfahren", "Ruhezustand", "Energiesparen" };
         static readonly int[] LogDayChoices = { 7, 14, 30, 90, 180, 365, 0 };
         readonly ToggleSwitch tBackground, tAutostart, tExplorer, tWeb, tHttps, tInternet;
 
@@ -62,7 +65,7 @@ namespace SyncPilot
         public SettingsView(MainForm main) : base(main)
         {
             AppSettings s = AppSettings.Current;
-            scroll = new Panel();
+            scroll = new ScrollPanel();
             scroll.Dock = DockStyle.Fill;
             scroll.AutoScroll = true;
             scroll.BackColor = Theme.Bg;
@@ -91,8 +94,25 @@ namespace SyncPilot
             tExplorer.Checked = s.ExplorerEntry;
             cExplorer.Height = Theme.P(56 + 64 + 12);
 
+            // ---------- Aufgaben übernehmen ----------
+            cImport = Section("Aufgaben übernehmen");
+            Label lImp = Ui.Label("Aus Easy2Sync", Theme.Body, Theme.Text, Theme.Surface);
+            Label lImpDesc = Ui.WrapLabel("Übernimmt Name, Ordner, Richtung, Filter, Bezeichnungen, Sperrdatei und Befehle aus der Datei " +
+                "easy2sync.sdb. Kennwörter, Zeitplan und Ordnerüberwachung bitte danach selbst eintragen.", Theme.Small, Theme.TextDim, Theme.Surface);
+            FlatButton btnImp = new FlatButton("Datei auswählen \u2026", Theme.GFolder, BtnKind.Secondary);
+            btnImp.Click += delegate { ImportEasy2Sync(); };
+            cImport.Controls.AddRange(new Control[] { lImp, lImpDesc, btnImp });
+            cImport.Height = Theme.P(56 + 64 + 12);
+            cImport.Resize += delegate
+            {
+                int y = Theme.P(52);
+                btnImp.Location = new Point(cImport.Width - Theme.P(20) - btnImp.Width, y + (Theme.P(64) - btnImp.Height) / 2);
+                lImp.Location = new Point(Theme.P(20), y + Theme.P(10));
+                lImpDesc.SetBounds(Theme.P(20), y + Theme.P(30), Math.Max(10, btnImp.Left - Theme.P(32)), Theme.Small.Height * 2 + Theme.P(2));
+            };
+
             // ---------- Protokolle ----------
-            cLogs = Section("Protokolle");
+            cLogs = Section("Protokolle und Abschluss");
             Label lLogs = Ui.Label("Protokolle aufbewahren", Theme.Body, Theme.Text, Theme.Surface);
             Label lLogsDesc = Ui.WrapLabel("Ältere Protokolle werden automatisch gelöscht, der Verlauf bleibt. " +
                 "Automatische Läufe ohne Änderungen schreiben kein Protokoll.", Theme.Small, Theme.TextDim, Theme.Surface);
@@ -103,14 +123,33 @@ namespace SyncPilot
             if (li < 0) { cbLogDays.Items.Add(s.LogDays + " Tage"); li = cbLogDays.Items.Count - 1; }
             cbLogDays.SelectedIndex = li;
             cbLogDays.SelectedIndexChanged += delegate { MarkDirty(); };
-            cLogs.Controls.AddRange(new Control[] { lLogs, lLogsDesc, cbLogDays });
-            cLogs.Height = Theme.P(56 + 64 + 12);
+            Label lAfter = Ui.Label("Nach „Alle synchronisieren“", Theme.Body, Theme.Text, Theme.Surface);
+            Label lAfterDesc = Ui.WrapLabel("Den PC danach ausschalten oder schlafen legen – mit 60 Sekunden Countdown zum Abbrechen. " +
+                "Nicht nach einem Abbruch.", Theme.Small, Theme.TextDim, Theme.Surface);
+            cbAfterAll = Ui.Combo();
+            cbAfterAll.AccessibleName = "Nach Alle synchronisieren";
+            cbAfterAll.Items.AddRange(new object[] { "Nichts tun", "Herunterfahren", "Ruhezustand", "Energiesparmodus" });
+            cbAfterAll.SelectedIndex = Math.Max(0, Array.IndexOf(AfterAllKeys, s.AfterAll ?? "Nichts"));
+            cbAfterAll.SelectedIndexChanged += delegate { MarkDirty(); };
+            cLogs.Controls.AddRange(new Control[] { lLogs, lLogsDesc, cbLogDays, lAfter, lAfterDesc, cbAfterAll });
+            cLogs.Height = Theme.P(56 + 2 * 64 + 12);
+            cLogs.Paint += delegate (object o, PaintEventArgs e)
+            {
+                using (Pen p = new Pen(Theme.Border))
+                    e.Graphics.DrawLine(p, Theme.P(20), Theme.P(52 + 64), cLogs.Width - Theme.P(20), Theme.P(52 + 64));
+            };
             cLogs.Resize += delegate
             {
                 int y = Theme.P(52), cw = Theme.P(160);
-                cbLogDays.SetBounds(cLogs.Width - Theme.P(20) - cw, y + (Theme.P(64) - cbLogDays.Height) / 2, cw, cbLogDays.Height);
-                lLogs.Location = new Point(Theme.P(20), y + Theme.P(10));
-                lLogsDesc.SetBounds(Theme.P(20), y + Theme.P(30), Math.Max(10, cbLogDays.Left - Theme.P(32)), Theme.P(32));
+                foreach (object[] row in new object[][] { new object[] { lLogs, lLogsDesc, cbLogDays }, new object[] { lAfter, lAfterDesc, cbAfterAll } })
+                {
+                    ChoiceBox cb = (ChoiceBox)row[2];
+                    cb.SetBounds(cLogs.Width - Theme.P(20) - cw, y + (Theme.P(64) - cb.Height) / 2, cw, cb.Height);
+                    ((Label)row[0]).Location = new Point(Theme.P(20), y + Theme.P(10));
+                    ((Label)row[1]).SetBounds(Theme.P(20), y + Theme.P(30), Math.Max(10, cb.Left - Theme.P(32)), Theme.Small.Height * 2 + Theme.P(2));
+                    y += Theme.P(64);
+                }
+                cLogs.Invalidate();
             };
 
             // ---------- Steuerung per Handy ----------
@@ -264,6 +303,101 @@ namespace SyncPilot
 
         // =============== Aufbau ===============
 
+        /// <summary>Aufgaben aus einer easy2sync.sdb lesen, Liste zeigen und nach Rückfrage anlegen (nur manuell, ohne Zeitplan).</summary>
+        void ImportEasy2Sync()
+        {
+            string file;
+            using (OpenFileDialog d = new OpenFileDialog())
+            {
+                d.Title = "Aufgabenliste von Easy2Sync auswählen";
+                d.Filter = "Easy2Sync-Aufgaben (*.sdb)|*.sdb|Alle Dateien (*.*)|*.*";
+                d.FileName = "easy2sync.sdb";
+                try
+                {
+                    string guess = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Easy2Sync für Dateien");
+                    if (Directory.Exists(guess)) d.InitialDirectory = guess;
+                }
+                catch { }
+                if (d.ShowDialog(this) != DialogResult.OK) return;
+                file = d.FileName;
+            }
+            List<ImportedJob> found;
+            Cursor = Cursors.WaitCursor;
+            try { found = Easy2SyncImport.Read(file); }
+            catch (Exception ex)
+            {
+                Cursor = Cursors.Default;
+                MessageBox.Show("Die Datei konnte nicht gelesen werden:\n" + ex.Message, "Sync Pilot", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            Cursor = Cursors.Default;
+
+            // Gruppen und kurze Namen vorschlagen ("Sync PC <-> NAS (Dokumente)" -> Gruppe "NAS", Name "Dokumente")
+            int canGroup = 0;
+            foreach (ImportedJob ij in found)
+            {
+                string g, n;
+                if (string.IsNullOrWhiteSpace(ij.Job.Group) && Easy2SyncImport.SuggestGroup(ij.Job.Name, out g, out n)) canGroup++;
+            }
+            if (canGroup > 0)
+            {
+                ImportedJob sample = found.First(x => { string g0, n0; return Easy2SyncImport.SuggestGroup(x.Job.Name, out g0, out n0); });
+                string sg, sn;
+                Easy2SyncImport.SuggestGroup(sample.Job.Name, out sg, out sn);
+                DialogResult gr = MessageBox.Show(canGroup + " von " + found.Count + " Aufgaben lassen sich nach Gruppen ordnen und kürzer benennen, z. B.:\n\n" +
+                    "„" + sample.Job.Name + "“\n→ Gruppe „" + sg + "“, Name „" + sn + "“\n\n" +
+                    "Ja = mit Gruppen und kurzen Namen übernehmen\nNein = Namen unverändert übernehmen",
+                    "Sync Pilot", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+                if (gr == DialogResult.Cancel) return;
+                if (gr == DialogResult.Yes)
+                    foreach (ImportedJob ij in found)
+                    {
+                        string g, n;
+                        if (!string.IsNullOrWhiteSpace(ij.Job.Group) || !Easy2SyncImport.SuggestGroup(ij.Job.Name, out g, out n)) continue;
+                        ij.Job.Group = g;
+                        ij.Job.Name = n;
+                    }
+            }
+
+            // Doppelt ist, was es mit gleichem Namen in derselben Gruppe schon gibt (auch innerhalb der Datei)
+            HashSet<string> names = new HashSet<string>(Main.Jobs.Select(x => (x.Group ?? "").Trim() + "\n" + x.Name), StringComparer.OrdinalIgnoreCase);
+            List<ImportedJob> fresh = new List<ImportedJob>();
+            foreach (ImportedJob ij in found)
+                if (names.Add((ij.Job.Group ?? "").Trim() + "\n" + ij.Job.Name)) fresh.Add(ij);
+            int dup = found.Count - fresh.Count;
+            if (fresh.Count == 0)
+            {
+                MessageBox.Show(found.Count == 0 ? "In der Datei wurden keine Aufgaben gefunden."
+                    : "Alle " + found.Count + " Aufgaben gibt es in Sync Pilot schon (gleicher Name und gleiche Gruppe).", "Sync Pilot", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine(fresh.Count + (fresh.Count == 1 ? " Aufgabe" : " Aufgaben") + " gefunden" +
+                (dup > 0 ? " (" + dup + " mit schon vorhandenem Namen werden ausgelassen)" : "") + ":");
+            sb.AppendLine();
+            foreach (ImportedJob ij in fresh.Take(15))
+                sb.AppendLine("• " + (string.IsNullOrWhiteSpace(ij.Job.Group) ? "" : ij.Job.Group + " › ") + ij.Job.Name + "  –  " + ij.Job.ModeText);
+            if (fresh.Count > 15) sb.AppendLine("• … und " + (fresh.Count - 15) + " weitere");
+            sb.AppendLine();
+            sb.AppendLine("Übernommen werden sie ohne Zeitplan (nur manuell). Der erste Lauf gleicht ab wie beim ersten Mal: " +
+                "Was nur auf einer Seite liegt, wird kopiert, nichts wird gelöscht. Bitte vorher „Analysieren“.");
+            if (MessageBox.Show(sb.ToString() + "\nJetzt übernehmen?", "Sync Pilot", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+
+            List<string> notes = new List<string>();
+            foreach (ImportedJob ij in fresh)
+            {
+                Main.Jobs.Add(ij.Job);
+                StateStore.Reset(ij.Job.Id); // neu anfangen, nicht nach einem verlorenen Stand fragen
+                List<string> imp = ij.Notes.Where(n => n.StartsWith("Anmeldung")).ToList();
+                foreach (string n in imp) notes.Add(ij.Job.Name + ": " + n);
+            }
+            Main.SaveJobs();
+            string msg = fresh.Count + (fresh.Count == 1 ? " Aufgabe wurde" : " Aufgaben wurden") + " übernommen.";
+            if (notes.Count > 0) msg += "\n\nBitte nachtragen:\n" + string.Join("\n", notes.Select(n => "• " + n));
+            msg += "\n\nZeitplan und Ordnerüberwachung bitte je Aufgabe neu einstellen.";
+            MessageBox.Show(msg, "Sync Pilot", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
         Card Section(string heading)
         {
             Card c = new Card();
@@ -353,6 +487,8 @@ namespace SyncPilot
                 y += cBack.Height + gap;
                 cExplorer.SetBounds(pad, y, W, cExplorer.Height);
                 y += cExplorer.Height + gap;
+                cImport.SetBounds(pad, y, W, cImport.Height);
+                y += cImport.Height + gap;
                 cLogs.SetBounds(pad, y, W, cLogs.Height);
                 y += cLogs.Height + gap;
 
@@ -640,6 +776,7 @@ namespace SyncPilot
             s.Autostart = tAutostart.Checked;
             s.ExplorerEntry = tExplorer.Checked;
             s.LogDays = logDays;
+            s.AfterAll = AfterAllKeys[Math.Max(0, Math.Min(AfterAllKeys.Length - 1, cbAfterAll.SelectedIndex))];
             s.WebEnabled = tWeb.Checked;
             s.WebPort = p;
             // Adresse aus dem Zertifikat übernehmen, wenn keine eingetragen ist

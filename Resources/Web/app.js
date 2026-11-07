@@ -131,43 +131,191 @@
       if (d.pc) $('info-pc').textContent = d.pc;
       $('copyright').textContent = '© ' + (d.year || new Date().getFullYear()) + ' Günther Schoder';
       state.jobs = d.jobs || [];
+      state.groupRun = d.groupRun;
+      renderGroupRun(d.groupRun);
       renderJobs();
       show('jobs');
       later(loadJobs, 5000, g);
     }).catch(function (e) { if (e.message !== 'login') later(loadJobs, 5000, g); });
   }
 
+  // Filter wie am PC: alle, mit Zeitplan, Fehler/Konflikte, länger als 7 Tage nicht gelaufen
+  var JOB_FILTERS = [
+    { label: 'Alle', test: function () { return true; } },
+    { label: 'Mit Zeitplan', test: function (j) { return j.sched; } },
+    { label: 'Fehler / Konflikte', test: function (j) { return j.kind === 'err' || j.kind === 'warn'; } },
+    { label: 'Länger nicht gelaufen', test: function (j) { return !j.disabled && (!j.lastTs || j.lastTs < Date.now() - 7 * 864e5); } }
+  ];
+  var SVG_SYNC = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.8 8.55H17.75L14.3 5.1M21.2 15.45H5.75l3.45 3.45"/></svg>';
+  var SVG_CHEV = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>';
+
+  function stored(key, def) {
+    try { var v = localStorage.getItem(key); return v === null ? def : JSON.parse(v); } catch (e) { return def; }
+  }
+  function store(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) { } }
+  state.jobFilter = stored('sp-filter', 0);
+  state.collapsed = stored('sp-collapsed', []);
+
+  function base(p) {
+    var t = String(p || '').replace(/[\\\/]+$/, '');
+    var i = Math.max(t.lastIndexOf('\\'), t.lastIndexOf('/'));
+    return i >= 0 && i < t.length - 1 ? t.substring(i + 1) : t;
+  }
+
+  function renderJobChips() {
+    var box = $('job-chips');
+    var keep = box.scrollLeft;
+    box.innerHTML = '';
+    JOB_FILTERS.forEach(function (f, n) {
+      var b = el('button');
+      b.type = 'button';
+      b.setAttribute('aria-pressed', n === state.jobFilter ? 'true' : 'false');
+      b.appendChild(document.createTextNode(f.label));
+      var cnt = state.jobs.filter(f.test).length;
+      // "Fehler / Konflikte": Zähler rot bei Fehlern, orange bei nur Konflikten
+      var alert = n === 2 && cnt > 0 ? (state.jobs.some(function (j) { return j.kind === 'err'; }) ? ' err' : ' warn') : '';
+      b.appendChild(el('span', 'n' + alert, String(cnt)));
+      b.addEventListener('click', function () { state.jobFilter = n; store('sp-filter', n); renderJobs(); });
+      box.appendChild(b);
+    });
+    box.scrollLeft = keep;
+  }
+
+  function renderGroupRun(gr) {
+    var box = $('group-run');
+    if (!gr || !gr.status) { box.hidden = true; return; }
+    box.hidden = false;
+    box.innerHTML = '';
+    var t = el('div', 'grtext');
+    t.appendChild(el('div', 'name', 'Gruppe „' + gr.group + '“'));
+    t.appendChild(el('div', 'meta' + (!gr.busy && gr.bad ? ' bad' : ''), gr.status));
+    box.appendChild(t);
+    if (gr.busy) {
+      var c = el('button', 'btn', 'Abbrechen');
+      c.type = 'button';
+      c.addEventListener('click', function () { c.disabled = true; api('POST', '/api/group/cancel').catch(function () {}); });
+      box.appendChild(c);
+    }
+  }
+
+  function groupInfo(js) {
+    var err = 0, warn = 0, never = 0;
+    js.forEach(function (j) {
+      if (j.kind === 'err') err++;
+      else if (j.kind === 'warn') warn++;
+      if (!j.lastTs && !j.disabled) never++;
+    });
+    var parts = [];
+    if (err) parts.push(err + ' mit Fehler');
+    if (warn) parts.push(warn + ' mit Konflikten');
+    if (never) parts.push(never + ' noch nie gelaufen');
+    return js.length + (js.length === 1 ? ' Aufgabe' : ' Aufgaben') + ' · ' + (parts.length ? parts.join(', ') : 'alle aktuell');
+  }
+
+  function jobRow(j) {
+    var row = el('div', 'jrow' + (j.disabled ? ' off' : ''));
+    var main = el('button', 'jmain');
+    main.type = 'button';
+    var running = j.busy || j.running;
+    main.appendChild(el('span', 'dot ' + (running ? 'live' : j.disabled ? 'none' : j.kind)));
+    var txt = el('span', 'jtext');
+    txt.appendChild(el('span', 'name', j.name));
+    var sides = j.named ? j.nameA + (j.mode === 'Abgleichen' ? ' ⇄ ' : ' → ') + j.nameB
+                        : base(j.a) + (j.mode === 'Abgleichen' ? ' ⇄ ' : ' → ') + base(j.b);
+    var st = running ? (j.busy ? (j.phase === 'sync' ? 'Synchronisiert …' : 'Analysiert …') : 'Läuft …')
+           : j.disabled ? 'Deaktiviert' : (j.kind === 'err' || j.kind === 'warn') ? j.status : j.last;
+    txt.appendChild(el('span', 'sub' + (!running && (j.kind === 'err' || j.kind === 'warn') ? ' ' + j.kind : ''), sides + ' · ' + st));
+    main.appendChild(txt);
+    main.addEventListener('click', function () {
+      var btns = j.busy ? [['Fortschritt ansehen', function () { go('a/' + j.id); }, true]]
+        : [['Analysieren', function () { start(j.id, false); }, true]];
+      if (!j.busy && !j.disabled) btns.push(['Synchronisieren', function () { start(j.id, true); }]);
+      sheet(j.name, j.a + (j.mode === 'Abgleichen' ? '  ⇄  ' : '  →  ') + j.b + '\n' + j.modeText + ' · ' + j.schedule + ' · Zuletzt: ' + j.last, btns);
+    });
+    row.appendChild(main);
+    var s = el('button', 'icon-btn jsync');
+    s.type = 'button';
+    s.innerHTML = SVG_SYNC;
+    s.setAttribute('aria-label', j.name + ' synchronisieren');
+    s.title = 'Synchronisieren';
+    if (j.busy || j.running || j.disabled) s.disabled = true;
+    s.addEventListener('click', function () { start(j.id, true); });
+    row.appendChild(s);
+    return row;
+  }
+
   function renderJobs() {
     var box = $('jobs');
     box.innerHTML = '';
     if (!state.jobs.length) {
+      $('job-chips').hidden = true;
       box.appendChild(el('div', 'card empty muted', 'Noch keine Aufgaben. Aufgaben werden in Sync Pilot am PC angelegt.'));
       return;
     }
-    state.jobs.forEach(function (j) {
-      var card = el('div', 'card job');
-      var dev = icon(j.devB === 'web' ? 'web' : j.devA);
-      if (j.kind === 'err' || j.kind === 'warn') dev.classList.add(j.kind);
-      card.appendChild(dev);
-      var body = el('div');
-      var name = el('div', 'name');
-      name.appendChild(el('span', null, j.name));
-      name.appendChild(el('span', 'chip ' + (j.busy ? 'none' : j.kind), j.busy ? (j.phase === 'sync' ? 'Synchronisiert …' : 'Analysiert …') : j.status));
-      body.appendChild(name);
-      body.appendChild(el('div', 'paths', j.a + (j.mode === 'Abgleichen' ? '  ⇄  ' : '  →  ') + j.b));
-      body.appendChild(el('div', 'meta', 'Zuletzt: ' + j.last + ' · ' + j.modeText + ' · ' + j.schedule));
-      card.appendChild(body);
-      var buttons = el('div', 'buttons');
-      var b1 = el('button', 'btn', j.busy ? 'Fortschritt ansehen' : 'Analysieren');
-      b1.type = 'button';
-      b1.addEventListener('click', j.busy ? function () { go('a/' + j.id); } : function () { start(j.id, false); });
-      var b2 = el('button', 'btn soft', 'Synchronisieren');
-      b2.type = 'button';
-      b2.addEventListener('click', function () { start(j.id, true); });
-      if (j.busy) b2.disabled = true;
-      buttons.appendChild(b1);
-      buttons.appendChild(b2);
-      card.appendChild(buttons);
+    $('job-chips').hidden = false;
+    renderJobChips();
+    var f = JOB_FILTERS[state.jobFilter] || JOB_FILTERS[0];
+    var shown = state.jobs.filter(f.test);
+    if (!shown.length) {
+      box.appendChild(el('div', 'card empty muted', 'Keine Aufgabe passt zu diesem Filter.'));
+      return;
+    }
+    var byName = function (a, b) { return a.name.localeCompare(b.name, 'de', { sensitivity: 'base' }); };
+    var grouped = state.jobs.some(function (j) { return j.group; });
+    if (!grouped) {
+      var all = el('div', 'card group');
+      shown.slice().sort(byName).forEach(function (j) { all.appendChild(jobRow(j)); });
+      box.appendChild(all);
+      return;
+    }
+    var names = [];
+    shown.forEach(function (j) { if (names.indexOf(j.group) < 0) names.push(j.group); });
+    names.sort(function (a, b) {
+      if (!a) return 1;
+      if (!b) return -1;
+      return a.localeCompare(b, 'de', { sensitivity: 'base' });
+    });
+    names.forEach(function (g) {
+      var js = shown.filter(function (j) { return j.group === g; }).sort(byName);
+      var label = g || 'Ohne Gruppe';
+      var closed = state.collapsed.indexOf(label) >= 0;
+      var card = el('section', 'card group' + (closed ? ' closed' : ''));
+      var head = el('div', 'ghead');
+      var t = el('button', 'gtoggle');
+      t.type = 'button';
+      t.setAttribute('aria-expanded', closed ? 'false' : 'true');
+      var chev = el('span', 'chev');
+      chev.innerHTML = SVG_CHEV;
+      t.appendChild(chev);
+      var tt = el('span', 'jtext');
+      tt.appendChild(el('span', 'name', label));
+      tt.appendChild(el('span', 'sub', groupInfo(state.jobs.filter(function (j) { return j.group === g; }))));
+      t.appendChild(tt);
+      t.addEventListener('click', function () {
+        var i = state.collapsed.indexOf(label);
+        if (i >= 0) state.collapsed.splice(i, 1); else state.collapsed.push(label);
+        store('sp-collapsed', state.collapsed);
+        renderJobs();
+      });
+      head.appendChild(t);
+      var active = state.jobs.filter(function (j) { return j.group === g && !j.disabled; }).length;
+      var s = el('button', 'icon-btn gsync');
+      s.type = 'button';
+      s.innerHTML = SVG_SYNC;
+      s.setAttribute('aria-label', 'Gruppe ' + label + ' synchronisieren');
+      s.title = 'Gruppe synchronisieren';
+      if (!active || (state.groupRun && state.groupRun.busy)) s.disabled = true;
+      s.addEventListener('click', function () {
+        sheet('Gruppe „' + label + '“ synchronisieren?',
+          'Alle ' + active + ' aktiven Aufgaben nacheinander. Konflikte werden übersprungen; bei auffällig vielen Löschungen wird eine Aufgabe zur Sicherheit nicht ausgeführt.',
+          [['Jetzt synchronisieren', function () {
+            api('POST', '/api/group/sync', { group: g }).then(function (d) { state.groupRun = d; renderGroupRun(d); renderJobs(); })
+              .catch(function () {});
+          }, true]]);
+      });
+      head.appendChild(s);
+      card.appendChild(head);
+      if (!closed) js.forEach(function (j) { card.appendChild(jobRow(j)); });
       box.appendChild(card);
     });
   }
@@ -178,6 +326,12 @@
   }
 
   // ---------- Analyse ----------
+
+  // eigene Bezeichnungen der Ordner (z. B. "PC" und "NAS") statt A und B
+  function sd(t) {
+    var na = state.nameA || 'A', nb = state.nameB || 'B';
+    return String(t).replace(/(^|[^\w\\:])([AB])(?![\w:])/g, function (m, pre, x) { return pre + (x === 'A' ? na : nb); });
+  }
 
   var FILTERS = [
     { label: 'Alle', test: function () { return true; } },
@@ -212,6 +366,8 @@
   function renderAnalysis(d) {
     var busy = d.phase === 'analyse' || d.phase === 'sync';
     $('an-name').textContent = d.name;
+    state.nameA = d.nameA || 'A';
+    state.nameB = d.nameB || 'B';
     var status = d.error ? d.error : d.status;
     if (d.result && !busy) status = d.result + (status ? ' · ' + status : '');
     $('an-status').textContent = status || (d.phase === 'leer' ? 'Noch nicht analysiert.' : '');
@@ -269,7 +425,7 @@
       var b = el('button');
       b.type = 'button';
       b.setAttribute('aria-pressed', n === state.filter ? 'true' : 'false');
-      b.appendChild(document.createTextNode(f.label));
+      b.appendChild(document.createTextNode(sd(f.label)));
       b.appendChild(el('span', 'n', String(state.items.filter(f.test).length)));
       b.addEventListener('click', function () { state.filter = n; renderFilter(); renderItems(); });
       box.appendChild(b);
@@ -286,7 +442,7 @@
       b.type = 'button';
       b.appendChild(el('span', 'chip ' + it.chosen, it.label));
       b.appendChild(el('span', 'rel', it.rel));
-      b.appendChild(el('span', 'sub', (it.chosen !== it.proposed ? 'Von dir geändert · ' : '') + it.reason + ' · ' + it.size + ' · A: ' + it.ta + ' · B: ' + it.tb));
+      b.appendChild(el('span', 'sub', (it.chosen !== it.proposed ? 'Von dir geändert · ' : '') + it.reason + ' · ' + it.size + ' · ' + state.nameA + ': ' + it.ta + ' · ' + state.nameB + ': ' + it.tb));
       b.addEventListener('click', function () { chooseSheet(it); });
       box.appendChild(b);
     });
@@ -294,10 +450,10 @@
 
   function chooseSheet(it) {
     var opts = [];
-    if (it.hasA) opts.push(['NachB', '→ Nach B kopieren']);
-    if (it.hasB) opts.push(['NachA', '← Nach A kopieren']);
-    if (it.hasA) opts.push(['LoeschenA', 'In A löschen']);
-    if (it.hasB) opts.push(['LoeschenB', 'In B löschen']);
+    if (it.hasA) opts.push(['NachB', sd('→ Nach B kopieren')]);
+    if (it.hasB) opts.push(['NachA', sd('← Nach A kopieren')]);
+    if (it.hasA && !it.noDelA) opts.push(['LoeschenA', sd('In A löschen')]);
+    if (it.hasB && !it.noDelB) opts.push(['LoeschenB', sd('In B löschen')]);
     opts.push(['Keine', 'Überspringen']);
     if (it.chosen !== it.proposed) opts.push(['Vorschlag', 'Vorschlag wiederherstellen']);
     sheet(it.rel, it.reason, opts.map(function (o) {

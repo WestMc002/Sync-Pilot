@@ -6,6 +6,25 @@ Aktuelle Version: siehe Info-Fenster (Klick auf die Versionsnummer) bzw.
 Eigenschaften > Details der EXE.
 
 Versionen:
+  1.27.2026.1106 Neu je Aufgabe: eigene Bezeichnungen für A und B (z. B. PC und
+                 NAS) in Analyse, Protokoll und auf dem Handy; Regel für Konflikte
+                 (fragen, neuere Datei, A oder B gewinnt); niemals löschen in A
+                 bzw. B; ältere Versionen aufbewahren; Sommerzeit-Versatz (1 h)
+                 ignorieren; NTFS-Rechte übertragen; Sperrdatei gegen gleich-
+                 zeitigen Abgleich von mehreren PCs; Befehle vor und nach dem
+                 Kopieren. Rechtsklick > "Gespeicherten Stand zurücksetzen";
+                 nach "Alle synchronisieren" auf Wunsch herunterfahren bzw.
+                 schlafen legen; Aufgaben aus Easy2Sync übernehmen (auf Wunsch
+                 mit Gruppen und kurzen Namen); Schreibweise (Groß-/Klein-
+                 schreibung) von Ordnern und Dateien wird angeglichen; Option
+                 "Unterordner einbeziehen"; Analyse ohne Unterschiede zählt als
+                 Lauf ("Aktuell", Stand wird gespeichert); Aufgabenliste als Kacheln oder
+                 kompakte Liste, nach Gruppe geordnet (zuklappbar, "Gruppe
+                 synchronisieren"), Filter (mit Zeitplan, Fehler/Konflikte,
+                 länger nicht gelaufen), Mehrfachauswahl und Sortierung; auf dem
+                 Handy ebenso kompakt nach Gruppen mit Filtern; behoben:
+                 Unterlängen in Pfadfeldern abgeschnitten, Versionsplakette mit
+                 12 Abstand zum Namen, Aufgaben-Symbol auf dem Handy größer
   1.24.2026.1105 Erste Vorabversion auf GitHub; Updates finden auch
                  Vorabversionen; Versionsplakette kleiner und näher am Namen;
                  behoben: abgeschnittene Texte bei "Speichern & analysieren",
@@ -130,12 +149,117 @@ Analyse und Vorschau
 Optionen
   Löschungen übernehmen, In den Papierkorb, Versteckte Dateien,
   Inhalt vergleichen (bei gleicher Größe, aber anderem Datum).
+  Unterordner einbeziehen (Standard): aus = nur die Dateien direkt im
+  gewählten Ordner abgleichen (wie Easy2Sync ohne "inklusive Unterver-
+  zeichnisse"). Ein früher bei den Ordnern eingetragenes "*" wird in diese
+  Option umgewandelt.
+  Ältere Versionen aufbewahren: Überschriebene und gelöschte Dateien kommen
+  vorher in den Ordner "_Sync Pilot Versionen" derselben Seite (Name mit
+  Datum und Uhrzeit). Der Ordner wird nie abgeglichen und nicht automatisch
+  geleert. Funktioniert auch auf NAS und FTP/SFTP (dort gibt es keinen
+  Papierkorb).
+  Sommerzeit-Versatz ignorieren (Standard): gleiche Größe und genau 1 Stunde
+  Zeitunterschied gilt als gleich (FAT-Laufwerke, USB-Sticks, manche NAS).
+  NTFS-Rechte übertragen: ausdrücklich gesetzte Zugriffsrechte und der
+  Vererbungsschutz werden mitkopiert (nur zwischen Windows-Laufwerken und
+  -Freigaben). Klappt das nicht, steht eine Warnung im Protokoll.
+
+Bezeichnungen für A und B
+  Unter den Ordnern lassen sich eigene Namen eintragen, z. B. "PC" und
+  "NAS". Sie erscheinen statt "A" und "B" in der Analyse ("Nach NAS"), im
+  Protokoll, im Rechtsklickmenü und auf dem Handy.
+
+Für Profis (je Aufgabe)
+  Datei auf beiden Seiten geändert: "Immer nachfragen" (Konflikt, Standard),
+    "Neuere Datei gewinnt", "A gewinnt" oder "B gewinnt". Mit einer Regel
+    wird nicht mehr gefragt; wurde eine Datei auf einer Seite gelöscht und
+    auf der anderen geändert, bleibt immer die geänderte Datei erhalten.
+  Niemals löschen in A bzw. B: auf dieser Seite wird nie etwas gelöscht,
+    auch nicht per Rechtsklick in der Analyse.
+  Sperrdatei: Solange die Datei existiert, gilt die Aufgabe als belegt
+    (z. B. \\NAS\Temp\Sync Bilder.ini, gleiche Datei auf allen PCs eintragen).
+    Automatische Läufe warten bis zu 30 Minuten, manuelle brechen ab. Eine
+    Sperre, die älter als 6 Stunden ist, gilt als verwaist. Wie bei Easy2Sync
+    zählt nur, ob die Datei existiert – beide Programme sperren sich also
+    gegenseitig, wenn sie dieselbe Datei verwenden.
+  Befehl vor und nach dem Kopieren: läuft mit cmd.exe (z. B. net stop mysql
+    oder "C:\Skripte\Fertig.bat"), Ausgabe und Rückgabewert stehen im
+    Protokoll. Mehrere Befehle mit " & " verbinden. Variablen:
+    %SYNCPILOT_A%, %SYNCPILOT_B%, %SYNCPILOT_AUFGABE%, nachher zusätzlich
+    %SYNCPILOT_ERGEBNIS%. "Nur, wenn es etwas zu tun gibt" (Standard): ohne
+    Änderungen laufen die Befehle nicht. "Nachher" läuft auch nach Fehlern
+    und Abbruch. Befehle mit Administratorrechten (net stop) gehen nur, wenn
+    Sync Pilot bzw. die geplante Aufgabe mit Administratorrechten läuft.
+  Nach dem Skript "Vorher" liest Sync Pilot beide Seiten neu ein und
+  synchronisiert nach dem aktuellen Stand (vom Skript gelöschte oder neu
+  angelegte Dateien, z. B. eine frische Datenbanksicherung, sind damit
+  berücksichtigt). Von Hand geänderte Aktionen bleiben erhalten.
+  Skripte: Rückgabewert ungleich 0 gilt als Fehler des Laufs (roter Status,
+  Hinweis im Infobereich). Pfade mit Leerzeichen brauchen keine Anführungs-
+  zeichen. Ist "nur bei Änderungen" aus, heißt die Schaltfläche in der
+  Analyse ohne Änderungen "Skripte ausführen" und startet die Befehle
+  trotzdem.
+
+Nach "Alle synchronisieren"
+  Einstellungen > "Protokolle und Abschluss": Nichts tun, Herunterfahren,
+  Ruhezustand oder Energiesparmodus. Vorher erscheint 60 Sekunden lang ein
+  Countdown mit "Abbrechen". Nach einem Abbruch passiert nichts.
+
+Quelle und Ziel tauschen
+  Rechtsklick auf eine Aufgabe > "Quelle und Ziel tauschen …" oder in
+  "Aufgabe bearbeiten" > "A und B tauschen". Getauscht werden Ordner, Gerät,
+  Bezeichnung, Anmeldung, Überwachung, "niemals löschen" und die Konflikt-
+  regel ("A gewinnt" wird "B gewinnt"). Der gespeicherte Stand wird
+  mitgedreht. Bei "Sichern" und "Spiegeln" ändert sich damit die Richtung –
+  vor dem ersten Lauf "Analysieren".
+
+Gespeicherten Stand zurücksetzen
+  Rechtsklick auf eine Aufgabe > "Gespeicherten Stand zurücksetzen …": Der
+  nächste Lauf ist wie ein erster Abgleich – nur auf einer Seite vorhandene
+  Dateien werden kopiert, nichts wird gelöscht.
+
+Aufgaben aus Easy2Sync übernehmen
+  Einstellungen > "Aufgaben übernehmen" > Datei easy2sync.sdb auswählen.
+  Übernommen werden Name, Ordner, Richtung (Replikation als "Spiegeln
+  A -> B"), "inklusive Unterverzeichnisse", Filterlisten (inkl. der globalen Vorgaben von
+  Easy2Sync), Bezeichnungen der Seiten, Sperrdatei und Befehle vor/nach dem
+  Sync. Nicht übernommen: Kennwörter (in Easy2Sync verschlüsselt – Sync Pilot
+  sagt, wo eine Anmeldung nachzutragen ist), Zeitplan, Ordnerüberwachung und
+  die gespeicherten Dateistände. Aufgaben mit schon vorhandenem Namen werden
+  ausgelassen. Der erste Lauf löscht nichts; vorher "Analysieren".
+  Namen wie "Sync PC <-> NAS (Dokumente)" lassen sich dabei auf Wunsch
+  aufteilen: Gruppe "NAS", Name "Dokumente" (Gruppe ist das andere Gerät;
+  ist das Ziel dieser PC, die Quelle).
+
+Aufgabenliste: Kacheln, Liste, Gruppen, Filter
+  Oben rechts zwischen Kacheln und kompakter Liste umschalten (wird
+  gemerkt). Die Liste zeigt Name, Ordner (bzw. Bezeichnungen wie
+  "PC ⇄ NAS"), Status und letzten Lauf; Klick auf einen Spaltenkopf sortiert.
+  Gruppe: in "Aufgabe bearbeiten" neben dem Namen (z. B. "NAS"). Gruppen
+  lassen sich zuklappen (wird gemerkt) und mit "Gruppe synchronisieren" am
+  Stück abgleichen; "Gruppiert" schaltet die Ordnung ab. Gleiche Namen sind
+  in verschiedenen Gruppen erlaubt. Gibt es noch keine Gruppen, bildet
+  "Gruppiert" sie auf Wunsch aus Namen wie "Sync PC <-> NAS (Dokumente)".
+  Verschieben: Aufgabe (bzw. alle ausgewählten) mit der Maus auf einen
+  Gruppenkopf oder eine Aufgabe der anderen Gruppe ziehen.
+  Oder Rechtsklick > "In Gruppe verschieben" > vorhandene Gruppe, "Ohne
+  Gruppe" oder "Neue Gruppe …" (gilt für alle ausgewählten Aufgaben).
+  Filter: Alle, Mit Zeitplan (auch Start bei Ereignissen), Fehler /
+  Konflikte, Länger nicht gelaufen (über 7 Tage) – zusammen mit der Suche.
+  Liste: Strg+Klick bzw. Umschalt+Klick wählt mehrere Aufgaben, dann
+  "Ausgewählte synchronisieren"; Strg+A wählt alle, Esc hebt auf;
+  Doppelklick bearbeitet, Rechtsklick öffnet das Menü.
+  Handy: dieselben Filter, Gruppen zum Zuklappen mit Symbol "Gruppe
+  synchronisieren", je Aufgabe eine kompakte Zeile; Tippen zeigt
+  Analysieren/Synchronisieren.
 
 Filter (ein Muster pro Zeile, wie bei Easy2Sync)
   Nicht abgleichen (Negativliste), getrennt für Dateien und Ordner:
     Thumbs.db, *.tmp     Dateiname (* und ? als Platzhalter)
     .well-known          Ordner mit diesem Namen, egal wo
     \writable\cache      fester Pfad ab dem Startordner der Aufgabe
+  Leerzeilen zur Gliederung bleiben erhalten, Zeilen mit # am Anfang sind
+  Kommentare – beides zählt beim Abgleich nicht.
   Nur diese abgleichen (Positivliste): Leer = alles. Sonst werden NUR passende
   Dateien bzw. Ordner (mit allem darin) abgeglichen; alles andere bleibt auf
   beiden Seiten unberührt.
@@ -154,8 +278,14 @@ Umbenennen und Verschieben
   wird das am Inhalt: gleiche Dateien mit gleicher Größe und Zeit (bei
   Ordnern der ganze Inhalt; mit "Inhalt vergleichen" auch am Inhalt). Nur
   eindeutige Fälle; sonst wie bisher löschen und kopieren. Rechtsklick >
-  "Überspringen" lässt die Umbenennung für diesen Lauf aus. Voraussetzung ist ein früherer Abgleich (gespeicherter
-  Stand), außer beim Spiegeln.
+  "Überspringen" lässt die Umbenennung für diesen Lauf aus. Voraussetzung
+  ist ein früherer Abgleich (gespeicherter Stand), außer beim Spiegeln.
+  Nur Groß-/Kleinschreibung geändert (z. B. "fotos" -> "Fotos"): wird auf der
+  anderen Seite angeglichen, ohne neu zu kopieren ("Schreibweise in A
+  geändert"). Welche Seite geändert wurde, zeigt der gespeicherte Stand; ohne
+  ihn, beim Sichern und beim Spiegeln gilt die Schreibweise von A. Bei
+  Ständen aus älteren Versionen kennt Sync Pilot die Schreibweise in B noch
+  nicht – beim ersten Lauf gilt dann ebenfalls A.
 
 Aufgabe deaktivieren
   In der Aufgabe "Aufgabe aktiv" ausschalten oder per Rechtsklick auf die
@@ -330,7 +460,7 @@ Daten
     Status\        Stand des letzten Laufs je Aufgabe (<ID>.state) und der
                    vorletzte als Sicherung (<ID>.state.bak)
     Protokolle\    ein Protokoll je Lauf; ältere als 30 Tage werden gelöscht
-                   (Einstellungen > Protokolle), automatische Läufe ohne
+                   (Einstellungen > Protokolle und Abschluss), automatische Läufe ohne
                    Änderungen schreiben keins (der Verlauf genügt)
   HKCU\Software\Sync Pilot\Explorer          gemerkter Ordner A
   HKCU\Software\Classes\...\shell\SyncPilot  Kontextmenü (Ordner, Laufwerke,

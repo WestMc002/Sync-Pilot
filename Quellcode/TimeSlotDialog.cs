@@ -63,8 +63,14 @@ namespace SyncPilot
             time.BackColor = Theme.Bg;
             time.Box.AccessibleName = "Uhrzeit";
             time.Text = slot.At;
+            // beim Verlassen gleich schön schreiben: 2330 -> 23:30, 930 -> 09:30, 7 -> 07:00
+            time.Box.Leave += delegate
+            {
+                string norm;
+                if (TimeSlot.TryParseTime(time.Text, out norm) && time.Text != norm) time.Text = norm;
+            };
             time.SetBounds(pad, y, Theme.P(110), time.Height);
-            Label hint = Ui.Label("z. B. 23:10", Theme.Small, Theme.TextDim, Theme.Bg);
+            Label hint = Ui.Label("z. B. 23:10 oder 2310", Theme.Small, Theme.TextDim, Theme.Bg);
             hint.Location = new Point(time.Right + g, y + Theme.P(10));
             y += time.Height + Theme.P(24);
 
@@ -99,7 +105,7 @@ namespace SyncPilot
             string at;
             if (!TimeSlot.TryParseTime(time.Text, out at))
             {
-                MessageBox.Show(this, "Bitte eine Uhrzeit wie 23:10 eingeben.", "Sync Pilot", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, "Bitte eine Uhrzeit wie 23:10 oder 2310 eingeben.", "Sync Pilot", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 time.Box.Focus();
                 return;
             }

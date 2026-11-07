@@ -39,6 +39,8 @@
 
   <section id="view-jobs" class="view" hidden>
     <h1>Aufgaben</h1>
+    <div id="job-chips" class="chips" role="toolbar" aria-label="Filter"></div>
+    <div id="group-run" class="card grouprun" role="status" hidden></div>
     <div id="jobs" class="list"></div>
   </section>
 
@@ -81,7 +83,7 @@
 
 <nav class="tabs" id="tabs" hidden>
   <button type="button" data-go="jobs" class="active">
-    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h13l-3-3M20 15H7l3 3"/></svg><span>Aufgaben</span>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.8 8.55H17.75L14.3 5.1M21.2 15.45H5.75l3.45 3.45"/></svg><span>Aufgaben</span>
   </button>
   <button type="button" data-go="history">
     <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg><span>Verlauf</span>

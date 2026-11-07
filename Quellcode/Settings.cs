@@ -26,6 +26,16 @@ namespace SyncPilot
         public bool NavPinned = true;
         /// <summary>Protokolle älter als so viele Tage automatisch löschen (0 = nie).</summary>
         public int LogDays = 30;
+        /// <summary>Nach „Alle synchronisieren“: "Nichts", "Herunterfahren", "Ruhezustand" oder "Energiesparen" (mit Countdown).</summary>
+        public string AfterAll = "Nichts";
+        /// <summary>Beim Speichern einer Aufgabe mit Ereignissen nicht mehr anbieten, im Hintergrund zu laufen.</summary>
+        public bool NoAskBackground;
+        /// <summary>Aufgaben als kompakte Liste statt als Kacheln zeigen.</summary>
+        public bool TaskList;
+        /// <summary>Aufgaben nach Gruppe ordnen (nur wenn mindestens eine Aufgabe eine Gruppe hat).</summary>
+        public bool TaskGrouped = true;
+        /// <summary>Zugeklappte Gruppen.</summary>
+        public List<string> CollapsedGroups = new List<string>();
         /// <summary>Beim Start auf GitHub nach einer neuen Version sehen (höchstens einmal täglich).</summary>
         public bool UpdateCheck = true;
         public DateTime LastUpdateCheck;

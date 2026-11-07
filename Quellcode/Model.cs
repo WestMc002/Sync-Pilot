@@ -15,6 +15,9 @@ namespace SyncPilot
 {
     public enum SyncMode { Abgleichen, Sichern, Spiegeln }
 
+    /// <summary>Was bei einem Konflikt passiert (Datei auf beiden Seiten geändert bzw. auf einer Seite geändert, auf der anderen gelöscht).</summary>
+    public enum ConflictRule { Fragen, Neuer, AGewinnt, BGewinnt }
+
     /// <summary>Taeglich und Stuendlich nur noch zum Einlesen älterer Aufgaben (siehe SyncJob.Upgrade).</summary>
     public enum ScheduleKind { Manuell, Taeglich, Stuendlich, BeiAnmeldung, Uhrzeiten, Intervall }
 
@@ -54,8 +57,11 @@ namespace SyncPilot
         public static bool TryParseTime(string text, out string at)
         {
             at = null;
-            string t = (text ?? "").Trim().Replace('.', ':');
-            if (t.EndsWith(" Uhr")) t = t.Substring(0, t.Length - 4).Trim();
+            string t = (text ?? "").Trim();
+            if (t.EndsWith("Uhr", StringComparison.OrdinalIgnoreCase)) t = t.Substring(0, t.Length - 3).Trim();
+            t = t.Replace('.', ':').Replace(',', ':').Replace(' ', ':').Replace('h', ':').Replace('H', ':').TrimEnd(':');
+            // nur Ziffern: "2330" -> 23:30, "930" -> 09:30, "23" -> 23:00, "7" -> 07:00
+            if (t.Length >= 3 && t.Length <= 4 && t.All(char.IsDigit)) t = t.Substring(0, t.Length - 2) + ":" + t.Substring(t.Length - 2);
             string[] parts = t.Split(':');
             int h, m = 0;
             if (parts.Length < 1 || parts.Length > 2 || !int.TryParse(parts[0], out h)) return false;
@@ -70,11 +76,16 @@ namespace SyncPilot
     {
         public string Id;
         public string Name;
+        /// <summary>Gruppe in der Aufgabenliste (z. B. "NAS"); leer = ohne Gruppe.</summary>
+        public string Group;
         public string FolderA;
         public string FolderB;
         /// <summary>Geräte-Icon je Ordner (siehe Devices.Keys, "Auto" = aus dem Pfad).</summary>
         public string DeviceA = "Auto";
         public string DeviceB = "Auto";
+        /// <summary>Eigene Bezeichnung für Ordner A bzw. B (z. B. "PC" und "NAS"); leer = "A" bzw. "B".</summary>
+        public string NameA;
+        public string NameB;
         /// <summary>Anmeldung an Netzwerkfreigaben; Kennwort mit Secret.Protect verschlüsselt.</summary>
         public string UserA;
         public string PassA;
@@ -88,6 +99,27 @@ namespace SyncPilot
         public bool UseRecycleBin = true;
         public bool IncludeHidden;
         public bool CompareContent;
+        /// <summary>Gleiche Größe und genau 1 Stunde Zeitunterschied gilt als gleich (Sommerzeit auf FAT-Laufwerken, NAS).</summary>
+        public bool IgnoreDstOffset = true;
+        /// <summary>Unterordner einbeziehen (aus: nur die Dateien direkt im gewählten Ordner, wie Easy2Sync ohne „inklusive Unterverzeichnisse“).</summary>
+        public bool IncludeSubdirs = true;
+        /// <summary>NTFS-Zugriffsrechte von Dateien und Ordnern mitkopieren (nur lokale Laufwerke und Windows-Freigaben).</summary>
+        public bool CopyRights;
+        /// <summary>Überschriebene und gelöschte Dateien vorher in den Ordner "_Sync Pilot Versionen" der jeweiligen Seite verschieben.</summary>
+        public bool KeepVersions;
+        /// <summary>Auf dieser Seite nie etwas löschen.</summary>
+        public bool NeverDeleteA;
+        public bool NeverDeleteB;
+        public ConflictRule Conflicts;
+        /// <summary>Sperrdatei gegen gleichzeitigen Abgleich von einem anderen PC (leer = aus).</summary>
+        public string LockFile;
+        /// <summary>Befehl bzw. Skript vor und nach dem Kopieren (leer = aus).</summary>
+        public string ScriptBefore;
+        public string ScriptAfter;
+        /// <summary>Skripte nur ausführen, wenn es etwas zu kopieren, umzubenennen oder zu löschen gibt.</summary>
+        public bool ScriptsOnlyWithChanges = true;
+        /// <summary>Meldet das Skript vor dem Kopieren einen Fehler (Rückgabewert ungleich 0), nicht synchronisieren.</summary>
+        public bool ScriptAbortOnError;
         /// <summary>Nur noch zum Einlesen älterer Aufgaben (gemischte Liste, Ordner mit "\" am Ende); siehe Upgrade().</summary>
         public List<string> Excludes = new List<string>();
         /// <summary>Negativliste: Dateien bzw. Ordner mit diesem Namen oder Pfad nicht abgleichen.</summary>
@@ -165,6 +197,8 @@ namespace SyncPilot
             if (IncludeDirs == null) IncludeDirs = new List<string>();
             if (Excludes == null) Excludes = new List<string>();
             if (Times == null) Times = new List<TimeSlot>();
+            // früher: "ohne Unterordner" als Ausnahme "*" bei den Ordnern – jetzt eigener Schalter
+            if (ExcludeDirs.RemoveAll(x => x != null && x.Trim() == "*") > 0) IncludeSubdirs = false;
             // alter Zeitplan: "Täglich um …" = feste Uhrzeit an allen Tagen, "Stündlich" = alle 60 Minuten
             if (Schedule == ScheduleKind.Taeglich)
             {
@@ -213,11 +247,103 @@ namespace SyncPilot
             {
                 switch (Mode)
                 {
-                    case SyncMode.Sichern: return "Sichern A → B";
-                    case SyncMode.Spiegeln: return "Spiegeln A → B";
-                    default: return "Abgleichen A ⇄ B";
+                    case SyncMode.Sichern: return Sides("Sichern A → B");
+                    case SyncMode.Spiegeln: return Sides("Spiegeln A → B");
+                    default: return Sides("Abgleichen A ⇄ B");
                 }
             }
+        }
+
+        /// <summary>Bezeichnung von Ordner A bzw. B: eigener Name oder "A"/"B".</summary>
+        /// <summary>Quelle und Ziel tauschen: Ordner, Gerät, Bezeichnung, Anmeldung, Überwachung, "niemals löschen" und Konfliktregel.</summary>
+        public void SwapSides()
+        {
+            string t;
+            t = FolderA; FolderA = FolderB; FolderB = t;
+            t = DeviceA; DeviceA = DeviceB; DeviceB = t;
+            t = NameA; NameA = NameB; NameB = t;
+            t = UserA; UserA = UserB; UserB = t;
+            t = PassA; PassA = PassB; PassB = t;
+            t = CertA; CertA = CertB; CertB = t;
+            bool b;
+            b = NeverDeleteA; NeverDeleteA = NeverDeleteB; NeverDeleteB = b;
+            b = WatchA; WatchA = WatchB; WatchB = b;
+            if (Conflicts == ConflictRule.AGewinnt) Conflicts = ConflictRule.BGewinnt;
+            else if (Conflicts == ConflictRule.BGewinnt) Conflicts = ConflictRule.AGewinnt;
+        }
+
+        /// <summary>Skripte laufen auch ohne Änderungen (Option „nur bei Änderungen“ aus) – dann lohnt ein Lauf immer.</summary>
+        public bool ScriptsAlways
+        {
+            get
+            {
+                return !ScriptsOnlyWithChanges &&
+                    (!string.IsNullOrWhiteSpace(ScriptBefore) || !string.IsNullOrWhiteSpace(ScriptAfter));
+            }
+        }
+
+        /// <summary>
+        /// Kurzer Name einer Seite für Listen: eigene Bezeichnung, sonst aus dem Pfad gebildet –
+        /// Freigabe/FTP/SFTP: Rechner- bzw. Servername, USB-Stick (%DRIVELETTER:Name%): sein Name,
+        /// lokal: dieser PC mit Laufwerk, z. B. "PC (F:)".
+        /// </summary>
+        public string ShortSide(bool a)
+        {
+            string n = a ? NameA : NameB;
+            if (!string.IsNullOrWhiteSpace(n)) return n.Trim();
+            return ShortOfPath(a ? FolderA : FolderB);
+        }
+
+        static string hostName;
+
+        public static string ShortOfPath(string path)
+        {
+            string p = (path ?? "").Trim();
+            if (p.Length == 0) return "?";
+            try
+            {
+                if (FtpUrl.IsRemote(p)) return FtpUrl.Parse(p).Host;
+            }
+            catch { }
+            if (p.StartsWith("\\\\"))
+            {
+                string rest = p.Substring(2);
+                int i = rest.IndexOf('\\');
+                return i > 0 ? rest.Substring(0, i) : rest;
+            }
+            System.Text.RegularExpressions.Match usb = System.Text.RegularExpressions.Regex.Match(p, @"%DRIVELETTER:([^%]+)%",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (usb.Success) return usb.Groups[1].Value;
+            if (hostName == null)
+            {
+                try { hostName = System.Net.Dns.GetHostName(); } catch { }
+                if (string.IsNullOrEmpty(hostName)) hostName = Environment.MachineName;
+            }
+            string me = Demo.Active ? "PC" : hostName; // Screenshots ohne den echten Rechnernamen
+            if (p.Length >= 2 && p[1] == ':' && char.IsLetter(p[0])) return me + " (" + char.ToUpperInvariant(p[0]) + ":)";
+            return me;
+        }
+
+        public string SideName(bool a)
+        {
+            string n = a ? NameA : NameB;
+            return string.IsNullOrWhiteSpace(n) ? (a ? "A" : "B") : n.Trim();
+        }
+
+        /// <summary>Überschrift einer Seite: "Ordner A" bzw. der eigene Name.</summary>
+        public string SideTitle(bool a)
+        {
+            string n = a ? NameA : NameB;
+            return string.IsNullOrWhiteSpace(n) ? (a ? "Ordner A" : "Ordner B") : n.Trim();
+        }
+
+        static readonly System.Text.RegularExpressions.Regex SideWord = new System.Text.RegularExpressions.Regex(@"(?<![\w\\:])([AB])(?![\w:])");
+
+        /// <summary>Setzt in einem Anzeigetext ("Nach B", "Neu in A", "A → B") die eigenen Bezeichnungen der Ordner ein.</summary>
+        public string Sides(string text)
+        {
+            if (string.IsNullOrEmpty(text) || (string.IsNullOrWhiteSpace(NameA) && string.IsNullOrWhiteSpace(NameB))) return text;
+            return SideWord.Replace(text, delegate (System.Text.RegularExpressions.Match m) { return SideName(m.Value == "A"); });
         }
 
         public bool HasWatch { get { return WatchA || WatchB || !string.IsNullOrWhiteSpace(TriggerFile); } }
