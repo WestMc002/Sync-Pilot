@@ -504,7 +504,10 @@
   function sync(force) {
     api('POST', '/api/jobs/' + encodeURIComponent(state.analysisJob) + '/sync', { force: force }).then(function (d) {
       if (d._status === 409 && d.confirm) {
-        if (window.confirm(d.confirm)) sync(true);
+        // eigene Rückfrage im Design der Seite statt window.confirm; Vorauswahl ist „Schließen“ (riskante Aktion)
+        sheet('Trotzdem synchronisieren?', d.confirm, [['Trotzdem synchronisieren', function () { sync(true); }, false]]);
+        $('sheet-close').textContent = 'Abbrechen';
+        $('sheet-close').focus();
         return;
       }
       if (d._status !== 200) { $('an-status').textContent = d.error || 'Fehler'; return; }
@@ -699,6 +702,7 @@
   // ---------- Auswahlblatt ----------
 
   function sheet(title, sub, buttons) {
+    $('sheet-close').textContent = 'Schließen';
     $('sheet-title').textContent = title;
     $('sheet-sub').textContent = sub || '';
     var box = $('sheet-buttons');

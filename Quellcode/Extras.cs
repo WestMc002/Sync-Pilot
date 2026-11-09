@@ -1,4 +1,4 @@
-// Sync Pilot – NTFS-Rechte, Sperrdatei und Skripte vor/nach dem Kopieren
+﻿// Sync Pilot – NTFS-Rechte, Sperrdatei und Skripte vor/nach dem Kopieren
 // Copyright (C) 2026 Günther Schoder · https://www.westmc002.de
 // Lizenz: GNU General Public License v3.0 oder später (siehe LICENSE)
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -357,35 +357,31 @@ namespace SyncPilot
             }
             catch (Exception ex)
             {
-                System.Windows.Forms.MessageBox.Show(owner, action + " hat nicht geklappt:\n" + ex.Message, "Sync Pilot",
+                MessageBox.Show(owner, action + " hat nicht geklappt:\n" + ex.Message, "Sync Pilot",
                     System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Warning);
             }
         }
     }
 
     /// <summary>Kleines Fenster „… in 60 Sekunden“ mit „Jetzt“ und „Abbrechen“ (OK = ausführen).</summary>
-    public sealed class CountdownForm : System.Windows.Forms.Form
+    public sealed class CountdownForm : FixedDialog
     {
         int left;
         readonly System.Windows.Forms.Label text;
         readonly System.Windows.Forms.Timer timer;
         readonly string what;
 
-        public CountdownForm(string what, int seconds)
+        // gleicher Fensterrahmen und Hintergrund wie alle Dialoge (FixedDialog: normaler Rahmen, feste Größe)
+        public CountdownForm(string what, int seconds) : base("Sync Pilot")
         {
             this.what = what;
             left = seconds;
-            Text = "Sync Pilot";
-            FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
-            MaximizeBox = MinimizeBox = false;
             ShowInTaskbar = true;
             TopMost = true;
             StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
-            BackColor = Theme.Surface;
-            Font = Theme.Body;
             int p = Theme.P(24);
             ClientSize = new System.Drawing.Size(Theme.P(440), Theme.P(150));
-            text = Ui.WrapLabel("", Theme.Body, Theme.Text, Theme.Surface);
+            text = Ui.WrapLabel("", Theme.Body, Theme.Text, Theme.Bg);
             text.SetBounds(p, p, ClientSize.Width - 2 * p, Theme.P(48));
             FlatButton now = new FlatButton("Jetzt", null, BtnKind.Secondary);
             FlatButton stop = new FlatButton("Abbrechen", null, BtnKind.Primary);
@@ -415,12 +411,6 @@ namespace SyncPilot
         void Show_()
         {
             text.Text = "Alle Aufgaben sind fertig. " + what + " in " + left + (left == 1 ? " Sekunde." : " Sekunden.");
-        }
-
-        protected override void OnHandleCreated(EventArgs e)
-        {
-            base.OnHandleCreated(e);
-            try { Theme.ApplyTitleBar(this); } catch { }
         }
 
         protected override void Dispose(bool disposing)

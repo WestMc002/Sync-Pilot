@@ -1,4 +1,4 @@
-// Sync Pilot – Aufgabenübersicht
+﻿// Sync Pilot – Aufgabenübersicht
 // Copyright (C) 2026 Günther Schoder · https://www.westmc002.de
 // Lizenz: GNU General Public License v3.0 oder später (siehe LICENSE)
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -946,7 +946,7 @@ namespace SyncPilot
             link.DropDownItems.Add(mb.Item("Auf dem Desktop", '\uE7F4', delegate { Shortcuts.Create(this, job, null); }));
             link.DropDownItems.Add(mb.Item("In einem anderen Ordner \u2026", MenuHelper.Folder, delegate
             {
-                using (FolderBrowserDialog d = new FolderBrowserDialog())
+                using (FolderPicker d = new FolderPicker())
                 {
                     d.Description = "Ordner f\u00fcr die Verkn\u00fcpfung zu \u201e" + job.Name + "\u201c";
                     d.ShowNewFolderButton = true;

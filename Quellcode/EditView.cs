@@ -535,7 +535,7 @@ namespace SyncPilot
             FlatButton btnAvF = SmallBrowse("Ordner auswählen");
             btnAvF.Click += delegate
             {
-                using (FolderBrowserDialog d = new FolderBrowserDialog())
+                using (FolderPicker d = new FolderPicker())
                 {
                     d.Description = "Ordner, dessen Verfügbarkeit die Aufgabe startet";
                     if (Directory.Exists(Paths.TryResolve(availFolder.Text.Trim()))) d.SelectedPath = Paths.TryResolve(availFolder.Text.Trim());
@@ -1055,7 +1055,7 @@ namespace SyncPilot
                     "Benutzer und Kennwort stehen unter \u201eAnmeldung\u201c.", "Sync Pilot", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
-            using (FolderBrowserDialog d = new FolderBrowserDialog())
+            using (FolderPicker d = new FolderPicker())
             {
                 d.Description = desc;
                 d.ShowNewFolderButton = true;
@@ -1251,7 +1251,7 @@ namespace SyncPilot
             List<string> picked = new List<string>();
             if (dirs)
             {
-                using (FolderBrowserDialog d = new FolderBrowserDialog())
+                using (FolderPicker d = new FolderPicker())
                 {
                     d.Description = "Ordner innerhalb von " + root + " auswählen";
                     d.SelectedPath = root;
