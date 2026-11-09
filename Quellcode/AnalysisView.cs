@@ -1,4 +1,4 @@
-// Sync Pilot – Analyse, Vorschau und Synchronisation einer Aufgabe
+﻿// Sync Pilot – Analyse, Vorschau und Synchronisation einer Aufgabe
 // Copyright (C) 2026 Günther Schoder · https://www.westmc002.de
 // Lizenz: GNU General Public License v3.0 oder später (siehe LICENSE)
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -29,7 +29,7 @@ namespace SyncPilot
         readonly ProgressBar progress;
         readonly System.Windows.Forms.Timer timer;
         readonly ContextMenuStrip menu;
-        readonly ToolStripMenuItem miToB, miToA, miDelA, miDelB, miSkip, miReset, miShowA, miShowB, miOpenA, miOpenB;
+        readonly ToolStripMenuItem miToB, miToA, miDelA, miDelB, miSkip, miReset, miShowA, miShowB, miOpenA, miOpenB, miCompare;
 
         Analysis an;
         string error;
@@ -85,8 +85,9 @@ namespace SyncPilot
             list.Columns.Add("Aktion", ActionColumnWidth());
             list.Columns.Add("Datei", Theme.P(380));
             list.Columns.Add("Größe", Theme.P(90), HorizontalAlignment.Right);
-            list.Columns.Add(job.Sides("Geändert A"), Theme.P(130));
-            list.Columns.Add(job.Sides("Geändert B"), Theme.P(130));
+            // so breit wie die Überschrift mit Bezeichnung (z. B. "Geändert Sicherung-NAS"), höchstens 240
+            list.Columns.Add(job.Sides("Geändert A"), HeaderWidth(job.Sides("Geändert A"), Theme.P(130)));
+            list.Columns.Add(job.Sides("Geändert B"), HeaderWidth(job.Sides("Geändert B"), Theme.P(130)));
             list.Columns.Add("Grund", Theme.P(180));
             list.FillColumn = 1;   // Datei bekommt die restliche Breite, keine waagrechte Bildlaufleiste
             list.FillMin = 200;
@@ -107,9 +108,10 @@ namespace SyncPilot
             // Datei mit dem zugehörigen Programm öffnen (z. B. Bild anschauen, bevor man entscheidet)
             miOpenA = mb.Item("Öffnen aus " + job.SideTitle(true), '\uE8E5', delegate { OpenFile(true); });
             miOpenB = mb.Item("Öffnen aus " + job.SideTitle(false), '\uE8E5', delegate { OpenFile(false); });
+            miCompare = mb.Item("Inhalt vergleichen \u2026", '\uE8A7', delegate { CompareContent(); });
             miShowA = mb.Item("In " + job.SideTitle(true) + " anzeigen", MenuHelper.Folder, delegate { Reveal(true); });
             miShowB = mb.Item("In " + job.SideTitle(false) + " anzeigen", MenuHelper.Folder, delegate { Reveal(false); });
-            menu.Items.AddRange(new ToolStripItem[] { miToB, miToA, miDelA, miDelB, miSkip, miReset, new ToolStripSeparator(), miOpenA, miOpenB, miShowA, miShowB });
+            menu.Items.AddRange(new ToolStripItem[] { miToB, miToA, miDelA, miDelB, miSkip, miReset, new ToolStripSeparator(), miCompare, miOpenA, miOpenB, miShowA, miShowB });
             menu.Opening += MenuOpening;
             list.ContextMenuStrip = menu;
             pills[0].Checked = true;
@@ -132,7 +134,7 @@ namespace SyncPilot
             btnClose.Click += delegate { Main.ShowTasks(); };
             btnLog = new FlatButton("Protokoll öffnen", Theme.GDoc, BtnKind.Subtle);
             btnLog.Visible = false;
-            btnLog.Click += delegate { if (lastRun != null) Ui.Open(lastRun.LogFile); };
+            btnLog.Click += delegate { if (lastRun != null) Main.ShowLog(lastRun, false); };
             btnCancel = new FlatButton("Abbrechen", Theme.GCancel, BtnKind.Secondary);
             btnCancel.Click += delegate { cancel = true; btnCancel.Enabled = false; liveStatus = "Wird abgebrochen …"; };
             progress = new ProgressBar();
@@ -192,7 +194,7 @@ namespace SyncPilot
         {
             base.OnLayout(e);
             if (footer == null || listCard == null) return;
-            int pad = Theme.P(32), W = ClientSize.Width, H = ClientSize.Height - footer.Height;
+            int pad = Theme.P(28), W = ClientSize.Width, H = ClientSize.Height - footer.Height;
             btnBack.Location = new Point(pad - Theme.P(6), Theme.P(26));
             title.Location = new Point(btnBack.Right + Theme.P(8), Theme.P(18));
             btnRe.Location = new Point(W - pad - btnRe.Width, Theme.P(26));
@@ -213,7 +215,7 @@ namespace SyncPilot
 
         void LayoutFooter()
         {
-            int pad = Theme.P(32), W = footer.Width, H = footer.Height;
+            int pad = Theme.P(28), W = footer.Width, H = footer.Height;
             int by = (H - btnSync.Height) / 2;
             int x = W - pad - btnSync.Width;
             btnSync.Location = new Point(x, by);
@@ -233,7 +235,10 @@ namespace SyncPilot
             Graphics g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
             int pad = Theme.P(20), W = summary.Width, H = summary.Height;
-            int mid = Theme.P(150);
+            // Mitte so breit wie der Modus-Text (mit Bezeichnungen z. B. "Sichern Arbeits-PC → Sicherung-NAS"),
+            // höchstens ein Drittel; die Pfade links und rechts werden dafür eher gekürzt
+            int mid = Math.Max(Theme.P(150), Math.Min((W - 2 * pad) / 3,
+                TextRenderer.MeasureText(g, job.ModeText, Theme.Small, Size.Empty, TextFormatFlags.NoPrefix).Width + Theme.P(24)));
             int colW = (W - 2 * pad - mid) / 2;
             DrawSide(g, job.SideTitle(true).ToUpper(), Devices.Glyph(job.DeviceA, job.FolderA), job.FolderA, an == null ? null : an.FilesA.ToString("N0") + " Dateien · " + Fmt.Size(an.BytesA),
                 new Rectangle(pad, 0, colW, H), TextFormatFlags.Left);
@@ -241,7 +246,9 @@ namespace SyncPilot
                 new Rectangle(W - pad - colW, 0, colW, H), TextFormatFlags.Right);
             Rectangle c = new Rectangle(pad + colW, Theme.P(14), mid, Theme.P(36));
             Theme.DrawGlyph(g, job.Mode == SyncMode.Abgleichen ? Theme.GSwitch : Theme.GForward, 18f, c, Theme.Accent, TextFormatFlags.HorizontalCenter);
-            Theme.DrawText(g, job.ModeText, Theme.Small, new Rectangle(pad + colW, Theme.P(52), mid, Theme.P(22)), Theme.TextDim, TextFormatFlags.HorizontalCenter);
+            // passt es trotzdem nicht (schmales Fenster), auf zwei Zeilen umbrechen
+            TextRenderer.DrawText(g, job.ModeText, Theme.Small, new Rectangle(pad + colW, Theme.P(52), mid, Theme.P(40)), Theme.TextDim,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
         }
 
         void DrawSide(Graphics g, string label, char glyph, string path, string stats, Rectangle r, TextFormatFlags align)
@@ -283,7 +290,13 @@ namespace SyncPilot
             });
         }
 
-        static string Time(FileEntry e)
+        static int HeaderWidth(string text, int min)
+        {
+            int w = TextRenderer.MeasureText(text, Theme.Bold, Size.Empty, TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding).Width + Theme.P(28);
+            return Math.Min(Theme.P(240), Math.Max(min, w));
+        }
+
+                static string Time(FileEntry e)
         {
             if (e == null) return "—";
             if (e.IsDir) return "";
@@ -368,7 +381,17 @@ namespace SyncPilot
                 }
             }
             list.SelectedIndices.Clear();
-            list.VirtualListSize = view.Count;
+            // Fehler in WinForms: Ist die Liste nach unten geblättert und wird kürzer (z. B. Filter "Konflikte"),
+            // will VirtualListSize die oberste Zeile behalten und stürzt dabei ab. Deshalb erst ganz nach oben
+            // und auf 0, dann die neue Länge. Die Länge selbst ist vor dem Fehler schon gesetzt.
+            try
+            {
+                if (list.VirtualListSize > 0 && list.IsHandleCreated) list.EnsureVisible(0);
+                list.VirtualListSize = 0;
+                list.VirtualListSize = view.Count;
+            }
+            catch (NullReferenceException) { }
+            catch (ArgumentOutOfRangeException) { }
             list.Stretch();
             list.Invalidate();
         }
@@ -393,6 +416,7 @@ namespace SyncPilot
             miShowA.Enabled = sel.Count == 1 && sel[0].A != null && !FtpUrl.IsRemote(job.FolderA);
             miOpenA.Enabled = sel.Count == 1 && sel[0].A != null && !sel[0].IsDir && !FtpUrl.IsRemote(job.FolderA);
             miOpenB.Enabled = sel.Count == 1 && sel[0].B != null && !sel[0].IsDir && !FtpUrl.IsRemote(job.FolderB);
+            miCompare.Enabled = miOpenA.Enabled && miOpenB.Enabled;
             miShowB.Enabled = sel.Count == 1 && sel[0].B != null && !FtpUrl.IsRemote(job.FolderB);
         }
 
@@ -416,6 +440,25 @@ namespace SyncPilot
             List<PlanItem> sel = Selected();
             if (sel.Count != 1) return;
             Ui.Explore(Path.Combine(Paths.TryResolve(sideA ? job.FolderA : job.FolderB), sel[0].Rel), true);
+        }
+
+        string SidePath(PlanItem it, bool sideA)
+        {
+            FileEntry e = sideA ? it.A : it.B;
+            string rel = e != null && !string.IsNullOrEmpty(e.Rel) ? e.Rel : it.Rel;
+            return Path.Combine(Paths.TryResolve(sideA ? job.FolderA : job.FolderB), rel);
+        }
+
+        /// <summary>
+        /// Beide Fassungen Byte für Byte vergleichen (im Hintergrund). Bei Textdateien zusätzlich die ersten
+        /// abweichenden Zeilen zeigen; ist WinMerge installiert, kann man dort weitervergleichen.
+        /// </summary>
+        void CompareContent()
+        {
+            List<PlanItem> sel = Selected();
+            if (sel.Count != 1) return;
+            PlanItem it = sel[0];
+            FileCompare.Show(this, SidePath(it, true), SidePath(it, false), job.SideTitle(true), job.SideTitle(false), Path.GetFileName(it.Rel));
         }
 
         void OpenFile(bool sideA)

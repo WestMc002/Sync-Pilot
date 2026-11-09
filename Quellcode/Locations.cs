@@ -288,7 +288,7 @@ namespace SyncPilot
             FlatButton clear = new FlatButton("Entfernen", null, BtnKind.Subtle);
             ok.Width = Math.Max(ok.Width, Theme.P(90));
             ok.Location = new Point(W - p - ok.Width, y);
-            cancel.Location = new Point(ok.Left - Theme.P(8) - cancel.Width, y);
+            cancel.Location = new Point(ok.Left - Theme.P(10) - cancel.Width, y);
             clear.Location = new Point(p - Theme.P(8), y);
             ok.Click += delegate { Store_(); DialogResult = DialogResult.OK; };
             cancel.DialogResult = DialogResult.Cancel;

@@ -1,4 +1,4 @@
-// Sync Pilot – Aufgabe anlegen und bearbeiten
+﻿// Sync Pilot – Aufgabe anlegen und bearbeiten
 // Copyright (C) 2026 Günther Schoder · https://www.westmc002.de
 // Lizenz: GNU General Public License v3.0 oder später (siehe LICENSE)
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -34,7 +34,9 @@ namespace SyncPilot
         readonly ToggleSwitch tDeletes, tRecycle, tHidden, tContent, tActive, tDst, tRights, tVersions, tSubdirs;
         readonly InputBox minSize, maxSize;
         readonly Label lDeletesDesc;
-        readonly ChoiceBox cbSchedule, cbInterval;
+        readonly ChoiceBox cbSchedule, cbInterval, cbEvtGap;
+        readonly ToggleSwitch tEvtChanges;
+        static readonly int[] EvtGaps = { 0, 15, 30, 60, 120, 240, 480, 720, 1440 };
         readonly Label lWhen, lTimes, lInterval, lSchedInfo;
         readonly Panel timesFrame;
         readonly ListBox lbTimes;
@@ -86,11 +88,12 @@ namespace SyncPilot
             footer.Controls.AddRange(new Control[] { btnCancel, btnSaveAnalyze, btnSave });
             footer.Resize += delegate
             {
-                int y = (footer.Height - btnSave.Height) / 2, x = footer.Width - Theme.P(32) - btnSave.Width;
+                // Globale Richtlinien: "Abbrechen" links, "Speichern" (primär) ganz rechts, 10 Abstand
+                int y = (footer.Height - btnSave.Height) / 2, x = footer.Width - Theme.P(28) - btnSave.Width;
                 btnSave.Location = new Point(x, y);
-                x -= Theme.P(8) + btnSaveAnalyze.Width;
+                x -= Theme.P(10) + btnSaveAnalyze.Width;
                 btnSaveAnalyze.Location = new Point(x, y);
-                x -= Theme.P(8) + btnCancel.Width;
+                x -= Theme.P(10) + btnCancel.Width;
                 btnCancel.Location = new Point(x, y);
             };
 
@@ -455,6 +458,22 @@ namespace SyncPilot
             // --- Bei Ereignissen starten (nur solange Sync Pilot läuft, auch im Infobereich) ---
             cEvt = Section("Bei Ereignissen starten");
             Label lEvtHint = Ui.WrapLabel("Funktioniert, solange Sync Pilot läuft – auch nur im Infobereich.", Theme.Small, Theme.TextDim, Theme.Surface);
+            Label lGap = Ui.Label("Höchstens alle", Theme.Body, Theme.Text, Theme.Surface);
+            cbEvtGap = Ui.Combo();
+            cbEvtGap.AccessibleName = "Durch Ereignisse höchstens alle";
+            foreach (int m in EvtGaps) cbEvtGap.Items.Add(SyncJob.GapText(m));
+            int gi = Array.IndexOf(EvtGaps, j.EventMinGap);
+            if (gi < 0) { cbEvtGap.Items.Add(SyncJob.GapText(j.EventMinGap)); gi = cbEvtGap.Items.Count - 1; }
+            cbEvtGap.SelectedIndex = gi;
+            Label lGapHint = Ui.WrapLabel("Kommt ein Ereignis früher (seit dem letzten Lauf), wird es gesammelt und danach nachgeholt.",
+                Theme.Small, Theme.TextDim, Theme.Surface);
+            tEvtChanges = new ToggleSwitch();
+            tEvtChanges.Checked = j.EventOnlyChanges;
+            tEvtChanges.AccessibleName = "Nur wenn sich etwas geändert hat";
+            Label lEvtChanges = Ui.Label("Nur wenn sich etwas geändert hat", Theme.Body, Theme.Text, Theme.Surface);
+            lEvtChanges.Click += delegate { tEvtChanges.Checked = !tEvtChanges.Checked; };
+            Label lEvtChangesDesc = Ui.WrapLabel("Erst prüfen; ist auf keiner Seite etwas zu tun, still auslassen – kein Eintrag im Verlauf, keine Skripte.",
+                Theme.Small, Theme.TextDim, Theme.Surface);
             Label hWatch = Ui.Label("Änderungen im Ordner", Theme.Bold, Theme.Text, Theme.Surface);
             tWatchA = new ToggleSwitch();
             tWatchB = new ToggleSwitch();
@@ -532,7 +551,7 @@ namespace SyncPilot
             availDelay = NumberBox(j.AvailDelay, "Wartezeit vor dem Abgleich in Sekunden");
             Label lWaitUnit = Ui.Label("Sekunden bis zum Start", Theme.Small, Theme.TextDim, Theme.Surface);
 
-            cEvt.Controls.AddRange(new Control[] { lEvtHint, hWatch, tWatchA, lWatchA, tWatchB, lWatchB, lDelay, watchDelay, lDelayUnit, lWatchHint,
+            cEvt.Controls.AddRange(new Control[] { lEvtHint, lGap, cbEvtGap, lGapHint, tEvtChanges, lEvtChanges, lEvtChangesDesc, hWatch, tWatchA, lWatchA, tWatchB, lWatchB, lDelay, watchDelay, lDelayUnit, lWatchHint,
                 hFile, lFileHint, trigFile, btnFile, hAvail, lAvailHint, lAvF, availFolder, btnAvF, lAvH, availHost, lAvD, availDrive, btnAvD,
                 lCheck, availInterval, lCheckUnit, lWait, availDelay, lWaitUnit });
             cEvt.Height = Theme.P(700);
@@ -542,6 +561,16 @@ namespace SyncPilot
                 int y = Theme.P(52);
                 lEvtHint.SetBounds(p, y, w, Theme.P(22));
                 y += Theme.P(30);
+                lGap.Location = new Point(p, y + Theme.P(8));
+                cbEvtGap.SetBounds(p + lw, y, Math.Min(Theme.P(200), w - lw), cbEvtGap.Height);
+                y += Math.Max(Theme.P(36), cbEvtGap.Height) + Theme.P(4);
+                lGapHint.SetBounds(p, y, w, Theme.P(36));
+                y += Theme.P(40);
+                tEvtChanges.Location = new Point(p + w - tEvtChanges.Width, y + (Theme.P(36) - tEvtChanges.Height) / 2);
+                lEvtChanges.Location = new Point(p, y + Theme.P(8));
+                y += Theme.P(36);
+                lEvtChangesDesc.SetBounds(p, y, w - tEvtChanges.Width - g, Theme.P(36));
+                y += Theme.P(40 + 12);
                 hWatch.Location = new Point(p, y);
                 y += Theme.P(30);
                 foreach (object[] row in new object[][] { new object[] { lWatchA, tWatchA }, new object[] { lWatchB, tWatchB } })
@@ -770,7 +799,7 @@ namespace SyncPilot
         void LayoutSections()
         {
             if (cSched == null || cEvt == null || cPro == null || title == null) return;
-            int pad = Theme.P(32), gap = Theme.P(16);
+            int pad = Theme.P(28), gap = Theme.P(16);
             int W = Math.Min(scroll.ClientSize.Width - 2 * pad, Theme.P(1180));
             int y0 = scroll.AutoScrollPosition.Y;
             title.Location = new Point(pad - Theme.P(3), y0 + Theme.P(20));
@@ -1040,6 +1069,30 @@ namespace SyncPilot
             }
         }
 
+        // Enter = Speichern, Esc = Abbrechen (Globale Richtlinien). Enter bleibt in mehrzeiligen Feldern, Listen,
+        // Knöpfen und Feldern mit Vorschlagsliste (Gruppe) beim jeweiligen Steuerelement.
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (keyData == Keys.Escape) { Main.ShowTasks(); return true; }
+            if (keyData == Keys.Enter)
+            {
+                Control c = this;
+                while (c is ContainerControl && ((ContainerControl)c).ActiveControl != null) c = ((ContainerControl)c).ActiveControl;
+                while (c != null && !c.Focused && c.Controls.Count > 0)
+                {
+                    Control f = null;
+                    foreach (Control ch in c.Controls) if (ch.ContainsFocus) { f = ch; break; }
+                    if (f == null) break;
+                    c = f;
+                }
+                TextBox tb = c as TextBox;
+                bool own = c is ButtonBase || c is FlatButton || c is ListView || c is ListBox || c is ComboBox ||
+                           (tb != null && (tb.Multiline || tb.AutoCompleteMode != AutoCompleteMode.None));
+                if (!own) { btnSave.PerformClick(); return true; }
+            }
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
+
         /// <summary>Im Formular A und B tauschen; beim Speichern wird der gespeicherte Stand mitgedreht.</summary>
         void SwapForm()
         {
@@ -1120,6 +1173,28 @@ namespace SyncPilot
                 return Directory.Exists(r);
             }
             catch { return false; }
+        }
+
+        /// <summary>
+        /// Lokaler Ordner oder Freigabe, die selbst fehlt, deren Oberordner (Laufwerk, Freigabe) aber erreichbar ist:
+        /// der tiefste vorhandene Oberordner; sonst null (Rechner aus, Freigabe fehlt, Laufwerk nicht angeschlossen, FTP).
+        /// </summary>
+        static string ExistingParent(string path)
+        {
+            try
+            {
+                if (FtpUrl.IsRemote(path)) return null;
+                string p = Paths.Resolve(path).TrimEnd('\\');
+                if (Directory.Exists(p)) return null;
+                while (true)
+                {
+                    string parent = Path.GetDirectoryName(p);
+                    if (string.IsNullOrEmpty(parent)) return null;
+                    if (Directory.Exists(parent)) return parent;
+                    p = parent.TrimEnd('\\');
+                }
+            }
+            catch { return null; }
         }
 
         /// <summary>Knopf "…" über einer Filterliste: Namen oder Pfade per Auswahl aus Ordner A bzw. B übernehmen.</summary>
@@ -1301,16 +1376,50 @@ namespace SyncPilot
             { Fail("Beim Laufwerk bitte den Namen (z. B. MeinUsbStick) statt des Buchstabens eingeben – der Buchstabe kann sich ändern.", availDrive.Box); return null; }
 
             List<string> missing = new List<string>();
+            // Ziel erreichbar, nur der Ordner selbst fehlt noch: anbieten, ihn anzulegen
+            List<string> create = new List<string>(), createText = new List<string>();
             Cursor = Cursors.WaitCursor;
             try
             {
-                if (!Reachable(a, userA, passA, certA)) missing.Add("Ordner A: " + ra);
-                if (!Reachable(b, userB, passB, certB)) missing.Add("Ordner B: " + rb);
+                foreach (bool sideA in new bool[] { true, false })
+                {
+                    string path = sideA ? a : b, rp = sideA ? ra : rb;
+                    if (Reachable(path, sideA ? userA : userB, sideA ? passA : passB, sideA ? certA : certB)) continue;
+                    string parent = ExistingParent(path);
+                    if (parent != null)
+                    {
+                        create.Add(Paths.Resolve(path));
+                        createText.Add(SideTitle(sideA) + ": " + rp);
+                    }
+                    else missing.Add(SideTitle(sideA) + ": " + rp);
+                }
             }
             finally { Cursor = Cursors.Default; }
+            if (create.Count > 0)
+            {
+                bool one = create.Count == 1;
+                DialogResult r = MessageBox.Show((one ? "Diesen Ordner gibt es noch nicht:\n" : "Diese Ordner gibt es noch nicht:\n") +
+                    string.Join("\n", createText) + "\n\n" + "Jetzt anlegen?" +
+                    " (Bei „Nein“ wird die Aufgabe trotzdem gespeichert; der Ordner muss dann vor dem ersten Lauf da sein.)",
+                    "Sync Pilot", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+                if (r == DialogResult.Cancel) return null;
+                if (r == DialogResult.Yes)
+                {
+                    foreach (string dir in create)
+                    {
+                        try { Directory.CreateDirectory(dir); }
+                        catch (Exception ex)
+                        {
+                            MessageBox.Show("Der Ordner ließ sich nicht anlegen:\n" + dir + "\n\n" + ex.Message, "Sync Pilot",
+                                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                            return null;
+                        }
+                    }
+                }
+            }
             if (missing.Count > 0)
             {
-                DialogResult r = MessageBox.Show("Folgende Ordner sind gerade nicht erreichbar:\n\n" + string.Join("\n", missing) +
+                DialogResult r = MessageBox.Show("Folgende Ordner sind gerade nicht erreichbar:\n" + string.Join("\n", missing) +
                     "\n\nTrotzdem speichern? (Sinnvoll z. B. bei USB-Laufwerken, die nicht immer angeschlossen sind.)",
                     "Sync Pilot", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
                 if (r != DialogResult.Yes) return null;
@@ -1380,6 +1489,11 @@ namespace SyncPilot
             j.AvailDrive = drv.Length > 0 ? drv : null;
             j.AvailInterval = aInterval;
             j.AvailDelay = aDelay;
+            {
+                int gsel = cbEvtGap.SelectedIndex;
+                j.EventOnlyChanges = tEvtChanges.Checked;
+                j.EventMinGap = gsel >= 0 && gsel < EvtGaps.Length ? EvtGaps[gsel] : (original != null ? original.EventMinGap : 0);
+            }
 
             if (swapped)
             {

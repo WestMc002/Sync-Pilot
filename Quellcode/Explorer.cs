@@ -369,9 +369,10 @@ namespace SyncPilot
             FlatButton ok = new FlatButton("Analysieren", Theme.GPlay, BtnKind.Primary);
             FlatButton more = new FlatButton("Weitere Optionen \u2026", null, BtnKind.Secondary);
             FlatButton cancel = new FlatButton("Abbrechen", null, BtnKind.Secondary);
+            // [Abbrechen] [Weitere Optionen …] [Analysieren]: Primärknopf ganz rechts (Globale Richtlinien)
             ok.Location = new Point(W - pad - ok.Width, y);
-            more.Location = new Point(ok.Left - Theme.P(8) - more.Width, y);
-            cancel.Location = new Point(more.Left - Theme.P(8) - cancel.Width, y);
+            more.Location = new Point(ok.Left - Theme.P(10) - more.Width, y);
+            cancel.Location = new Point(more.Left - Theme.P(10) - cancel.Width, y);
             ok.DialogResult = DialogResult.Yes;
             more.DialogResult = DialogResult.No;
             cancel.DialogResult = DialogResult.Cancel;

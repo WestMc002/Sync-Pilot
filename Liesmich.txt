@@ -132,6 +132,8 @@ Ordner angeben
   Links neben jedem Ordner wählt man ein Geräte-Icon (oder "Automatisch").
   Das Kennwort wird mit Windows-Bordmitteln verschlüsselt gespeichert und ist
   nur mit dem eigenen Windows-Konto auf diesem Rechner lesbar.
+  Gibt es einen Ordner beim Speichern noch nicht, das Laufwerk bzw. die
+  Freigabe ist aber erreichbar, bietet Sync Pilot an, ihn anzulegen.
 
 Richtungen
   Abgleichen (A <-> B)  Änderungen in beide Richtungen. Löschungen werden über den
@@ -145,6 +147,17 @@ Analyse und Vorschau
   Nach A, Löschen, Konflikte. Per Rechtsklick lässt sich jede Aktion ändern
   oder überspringen. Wurde eine Datei auf beiden Seiten geändert, wird sie nie
   automatisch überschrieben, sondern als Konflikt angezeigt.
+
+Protokoll anzeigen
+  Im Verlauf per Doppelklick oder Rechtsklick > "Protokoll anzeigen", in den
+  Aufgaben über Rechtsklick > "Letztes Protokoll öffnen". Oben Ergebnis, Modus
+  und Kacheln (Kopiert, Gelöscht, Konflikte, Fehler; Klick filtert), darunter
+  jede Aktion mit Uhrzeit. Filter nach Richtung, Gelöscht, Umbenannt,
+  Konflikte & Übersprungen, Fehler (rot) sowie Skript & Hinweise (dort auch
+  die Ausgabe der Skripte); Suchfeld (Strg+F) für Datei oder Meldung.
+  Rechtsklick: Datei öffnen, Inhalt vergleichen, im Ordner zeigen, Zeilen
+  kopieren (auch Strg+C); Doppelklick zeigt die Datei im Explorer.
+  "Als Text öffnen" zeigt die Protokolldatei im Editor.
 
 Optionen
   Löschungen übernehmen, In den Papierkorb, Versteckte Dateien,
@@ -317,6 +330,14 @@ Bei Ereignissen starten (solange Sync Pilot läuft, auch nur im Infobereich)
   oder IP, Laufwerksname (z. B. MeinUsbStick). Geprüft wird alle x Sekunden,
   gestartet nach der eingestellten Wartezeit. Ist es beim Programmstart schon
   da, läuft die Aufgabe einmal.
+  Höchstens alle: begrenzt, wie oft Ereignisse die Aufgabe starten (z. B. alle
+  4 Stunden, gezählt ab dem letzten Lauf, auch manuell oder per Zeitplan).
+  Ein früheres Ereignis wird gesammelt und zum frühesten erlaubten Zeitpunkt
+  nachgeholt; Änderungen gehen so nicht verloren.
+  Nur wenn sich etwas geändert hat (Standard): ein Ereignis prüft erst; ist
+  auf keiner Seite etwas zu tun, wird still ausgelassen (kein Eintrag im
+  Verlauf, kein Protokoll, keine Skripte) - z. B. wenn ein Laptop im WLAN
+  ständig kurz weg und wieder da ist.
   Beim Speichern bietet Sync Pilot an, mit Windows zu starten und im
   Infobereich weiterzulaufen. Fehler meldet ein Hinweis am Infobereich.
 

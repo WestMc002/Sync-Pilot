@@ -76,8 +76,9 @@ namespace SyncPilot
 
             FlatButton ok = new FlatButton("OK", Theme.GCheck, BtnKind.Primary);
             FlatButton cancel = new FlatButton("Abbrechen", null, BtnKind.Secondary);
+            // "Abbrechen" links, Primärknopf ganz rechts (Globale Richtlinien), 10 Abstand
             ok.Location = new Point(W - pad - ok.Width, y);
-            cancel.Location = new Point(ok.Left - g - cancel.Width, y);
+            cancel.Location = new Point(ok.Left - Theme.P(10) - cancel.Width, y);
             cancel.DialogResult = DialogResult.Cancel;
             ok.Click += delegate { Accept(); };
             AcceptButton = ok;

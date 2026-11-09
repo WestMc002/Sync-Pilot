@@ -1218,6 +1218,7 @@ namespace SyncPilot
         static WebResponse_ History()
         {
             List<HistoryEntry> history = Store.LoadHistory();
+            List<SyncJob> jobs = Store.LoadJobs();
             List<object> list = new List<object>();
             for (int i = history.Count - 1; i >= 0 && list.Count < 200; i--)
             {
@@ -1226,6 +1227,9 @@ namespace SyncPilot
                 d["key"] = Key(h);
                 d["when"] = Fmt.When(h.Start);
                 d["job"] = h.JobName;
+                // Ordner wie in der Aufgabenliste ("PC → NAS"), damit gleichnamige Aufgaben unterscheidbar sind
+                SyncJob sj = jobs.FirstOrDefault(x => x.Id == h.JobId);
+                d["sides"] = sj == null ? "" : sj.ShortSide(true) + (sj.Mode == SyncMode.Abgleichen ? " \u21C4 " : " \u2192 ") + sj.ShortSide(false);
                 d["result"] = Fmt.Result(h);
                 d["kind"] = Kind(h);
                 d["copied"] = h.Copied;
@@ -1262,6 +1266,32 @@ namespace SyncPilot
             r["job"] = h.JobName;
             r["when"] = Fmt.When(h.Start);
             r["text"] = text;
+            r["duration"] = Fmt.Duration(h.Seconds);
+            r["scheduled"] = h.Scheduled;
+            r["result"] = Fmt.Result(h);
+            r["kind"] = Kind(h);
+            // zerlegt wie in der Desktop-Ansicht (LogView): Kopf, Kacheln, Einträge
+            try
+            {
+                LogParser lp = LogParser.FromFile(full);
+                r["sideA"] = lp.SideA;
+                r["sideB"] = lp.SideB;
+                r["mode"] = lp.Mode ?? "";
+                bool fromLog = lp.Copied >= 0;
+                r["copied"] = fromLog ? lp.Copied : h.Copied;
+                r["moved"] = fromLog ? lp.Moved : h.Moved;
+                r["deleted"] = fromLog ? lp.Deleted : h.Deleted;
+                r["conflicts"] = fromLog ? lp.Conflicts : h.Conflicts;
+                r["skipped"] = fromLog ? lp.Skipped : h.Skipped;
+                r["errors"] = fromLog ? lp.Errors : h.Errors;
+                r["size"] = h.Bytes > 0 ? Fmt.Size(h.Bytes) : "";
+                // kompakt: [Zeit, Art, Plakette, Text, Details, Ordner(1/0)]
+                List<object> items = new List<object>();
+                foreach (LogEntry e in lp.Entries)
+                    items.Add(new object[] { e.Time, e.Kind.ToString(), e.Chip, e.Rel != null && e.IsDir ? e.Text + "\\" : e.Text, e.Detail, e.Rel != null ? 1 : 0 });
+                r["entries"] = items;
+            }
+            catch { }
             return WebResponse_.Json(r);
         }
 

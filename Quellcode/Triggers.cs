@@ -174,6 +174,10 @@ namespace SyncPilot
         // Verfügbarkeit
         DateTime nextAvail;
 
+        // "Höchstens alle …": zu früher Anlass wird bis dahin zurückgestellt
+        string deferredReason;
+        DateTime deferUntil, lastRunUtc;
+
         public Watcher(SyncJob job, string signature)
         {
             Job = job;
@@ -211,6 +215,13 @@ namespace SyncPilot
         {
             SyncJob job = Job;
             DateTime now = DateTime.UtcNow;
+
+            // 0. Zurückgestellter Anlass ("Höchstens alle …") ist fällig
+            string late = null;
+            lock (changeLock)
+                if (deferredReason != null && (now >= deferUntil || job.EventMinGap <= 0)) { late = deferredReason; deferredReason = null; }
+            if (late != null) Run(late);
+            if (stop) return;
 
             // 1. Änderungen in Ordner A/B: erst starten, wenn WatchDelay Sekunden lang Ruhe war
             EnsureWatcher(0, job.WatchA ? job.FolderA : null, now);
@@ -358,13 +369,34 @@ namespace SyncPilot
                 }
                 return;
             }
+            // Höchstens alle x Minuten: zu früh -> zurückstellen und dann nachholen (Änderungen gehen nicht verloren)
+            if (job.EventMinGap > 0)
+            {
+                DateTime last = lastRunUtc;
+                try
+                {
+                    HistoryEntry lr = Store.LastRun(Store.LoadHistory(), job.Id);
+                    if (lr != null && lr.Start.ToUniversalTime() > last) last = lr.Start.ToUniversalTime();
+                }
+                catch { }
+                DateTime next = last.AddMinutes(job.EventMinGap);
+                if (DateTime.UtcNow < next)
+                {
+                    lock (changeLock)
+                    {
+                        if (deferredReason == null) deferredReason = reason.EndsWith(" (zurückgestellt)") ? reason : reason + " (zurückgestellt)";
+                        deferUntil = next;
+                    }
+                    return;
+                }
+            }
             // Laufwerk, Freigabe oder Server fehlt: still auslassen
             if (job.SkipOffline && Reach.Offline(job) != null) return;
             Running = true;
             HistoryEntry h;
             try
             {
-                h = Runner.Run(job, true, delegate { return stop; }, delegate (string s) { });
+                h = Runner.Run(job, true, delegate { return stop; }, delegate (string s) { }, job.EventOnlyChanges);
             }
             catch (Exception ex) { h = Runner.Crash(job, true, ex); }
             finally
@@ -376,6 +408,8 @@ namespace SyncPilot
                     ignoreUntil = DateTime.UtcNow.AddSeconds(5);
                 }
             }
+            if (h == null) return;   // nichts geändert: still ausgelassen
+            lastRunUtc = DateTime.UtcNow;
             Triggers.RaiseFinished(job, h, reason);
         }
     }

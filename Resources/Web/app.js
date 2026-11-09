@@ -134,10 +134,30 @@
       state.groupRun = d.groupRun;
       renderGroupRun(d.groupRun);
       renderJobs();
-      show('jobs');
-      later(loadJobs, 5000, g);
-    }).catch(function (e) { if (e.message !== 'login') later(loadJobs, 5000, g); });
+      // nur beim ersten Anzeigen nach oben – beim Aktualisieren bleibt die Bildlaufposition
+      if ($('view-jobs').hidden) show('jobs');
+      if (state.auto) later(loadJobs, 5000, g);
+    }).catch(function (e) { if (e.message !== 'login' && state.auto) later(loadJobs, 5000, g); });
   }
+
+  // Automatisch aktualisieren (Live) an/aus – wird gemerkt; aus: Knopf zum Aktualisieren von Hand
+  state.auto = stored('sp-auto', true);
+  function updateAutoButton() {
+    var b = $('auto-refresh');
+    b.setAttribute('aria-pressed', state.auto ? 'true' : 'false');
+    b.querySelector('.live-text').textContent = state.auto ? 'Live' : 'Pausiert';
+    b.title = state.auto ? 'Automatisch aktualisieren ist an – tippen zum Anhalten' : 'Automatisch aktualisieren ist aus – tippen zum Einschalten';
+    $('refresh-now').hidden = state.auto;
+  }
+  $('auto-refresh').addEventListener('click', function () {
+    state.auto = !state.auto;
+    store('sp-auto', state.auto);
+    updateAutoButton();
+    stopTimer();
+    if (state.auto) loadJobs();
+  });
+  $('refresh-now').addEventListener('click', function () { loadJobs(); });
+  updateAutoButton();
 
   // Filter wie am PC: alle, mit Zeitplan, Fehler/Konflikte, länger als 7 Tage nicht gelaufen
   var JOB_FILTERS = [
@@ -244,9 +264,16 @@
     return row;
   }
 
+  // Erst fertig aufbauen, dann auf einmal tauschen – sonst wird die Seite kurz leer und springt nach oben
   function renderJobs() {
-    var box = $('jobs');
-    box.innerHTML = '';
+    var frag = document.createDocumentFragment();
+    buildJobs(frag);
+    var t = $('jobs');
+    t.textContent = '';
+    t.appendChild(frag);
+  }
+
+  function buildJobs(box) {
     if (!state.jobs.length) {
       $('job-chips').hidden = true;
       box.appendChild(el('div', 'card empty muted', 'Noch keine Aufgaben. Aufgaben werden in Sync Pilot am PC angelegt.'));
@@ -492,8 +519,8 @@
     var g = state.gen;
     api('GET', '/api/history').then(function (d) {
       if (g !== state.gen) return;
-      var box = $('history');
-      box.innerHTML = '';
+      // in ein Fragment bauen und dann tauschen: die Seite springt beim Aktualisieren nicht nach oben
+      var box = document.createDocumentFragment();
       var runs = d.runs || [];
       if (!runs.length) box.appendChild(el('div', 'card empty muted', 'Noch keine Läufe.'));
       runs.forEach(function (r) {
@@ -501,26 +528,173 @@
         b.type = 'button';
         b.appendChild(el('span', 'strong', r.job));
         b.appendChild(el('span', 'chip ' + r.kind, r.result.length > 34 ? r.result.substring(0, 33) + '…' : r.result));
+        if (r.sides) b.appendChild(el('span', 'side', r.sides));
         b.appendChild(el('span', 'sub', r.when + ' · ' + (r.scheduled ? 'Zeitplan' : 'Manuell') + ' · ' + r.duration));
         b.appendChild(el('span', 'sub', r.copied + ' kopiert · ' + r.deleted + ' gelöscht' + (r.errors ? ' · ' + r.errors + ' Fehler' : '')));
-        if (r.hasLog) b.addEventListener('click', function () { go('log/' + r.key); });
+        if (r.hasLog) b.addEventListener('click', function () { state.histScroll = window.scrollY; go('log/' + r.key); });
         else b.disabled = true;
         box.appendChild(b);
       });
-      show('history');
+      var list = $('history');
+      list.innerHTML = '';
+      list.appendChild(box);
+      if ($('view-history').hidden) {
+        show('history');
+        // zurück aus dem Protokoll: wieder an die Stelle von vorher
+        if (state.histScroll) { window.scrollTo(0, state.histScroll); state.histScroll = 0; }
+      }
       later(loadHistory, 15000, g);
     }).catch(function (e) { if (e.message !== 'login') later(loadHistory, 15000, g); });
+  }
+
+  // Filter wie in der Desktop-Ansicht; Einträge: [Zeit, Art, Plakette, Text, Details, hatDatei]
+  var LOG_FILTERS = ['Alle', '→ Nach B', '← Nach A', 'Gelöscht', 'Umbenannt', 'Konflikte & Übersprungen', 'Fehler', 'Skript & Hinweise'];
+  var LOG_PAGE = 300;
+
+  function logIn(e, f) {
+    var k = e[1];
+    switch (f) {
+      case 1: return k === 'ToB';
+      case 2: return k === 'ToA';
+      case 3: return k === 'Delete';
+      case 4: return k === 'Rename';
+      case 5: return k === 'Conflict' || k === 'Skip';
+      case 6: return k === 'Error';
+      case 7: return ['Header', 'Script', 'ScriptOut', 'Warn', 'Info', 'Result'].indexOf(k) >= 0;
+      default: return k !== 'ScriptOut';
+    }
+  }
+
+  function logChipClass(k) {
+    switch (k) {
+      case 'ToB': return 'NachB';
+      case 'ToA': return 'NachA';
+      case 'Delete': case 'Error': return 'err';
+      case 'Conflict': case 'Warn': return 'warn';
+      case 'Rename': case 'Result': return 'ok';
+      default: return 'none';
+    }
   }
 
   function openLog(key) {
     var g = state.gen;
     api('GET', '/api/log/' + encodeURIComponent(key)).then(function (d) {
       if (g !== state.gen) return;
-      $('log-title').textContent = d._status === 200 ? d.job + ' · ' + d.when : 'Protokoll';
-      $('log-text').textContent = d._status === 200 ? d.text : (d.error || 'Nicht gefunden.');
+      var ok = d._status === 200;
+      $('log-title').textContent = ok ? d.job : 'Protokoll';
+      $('log-sub').textContent = ok ? d.when + ' · ' + (d.scheduled ? 'Zeitplan' : 'Manuell') + ' · ' + d.duration +
+        (d.sideA ? ' · ' + d.sideA + ' → ' + d.sideB : '') : '';
+      $('log-text').textContent = ok ? d.text : (d.error || 'Nicht gefunden.');
+      state.log = ok && d.entries ? d : null;
+      state.logFilter = 0;
+      state.logShown = LOG_PAGE;
+      $('log-search').value = '';
+      var parsed = !!state.log;
+      $('log-sum').hidden = !parsed;
+      $('log-search').hidden = !parsed;
+      $('log-raw').hidden = !parsed;
+      $('log-text').hidden = parsed;
+      $('log-raw').textContent = 'Als Text anzeigen';
+      if (parsed) { renderLogSummary(); renderLogChips(); renderLogList(); }
+      else { $('log-chips').innerHTML = ''; $('log-list').innerHTML = ''; $('log-more').hidden = true; }
       show('log');
     }).catch(function () {});
   }
+
+  function renderLogSummary() {
+    var d = state.log, box = $('log-sum');
+    box.innerHTML = '';
+    var res = el('div', 'res');
+    res.appendChild(el('span', 'chip ' + d.kind, d.result));
+    box.appendChild(res);
+    if (d.mode) box.appendChild(el('div', 'mode', d.mode));
+    var tiles = el('div', 'tiles');
+    [['Kopiert', d.copied, d.size, '', 1 + 0],
+     ['Gelöscht', d.deleted, d.moved ? d.moved + ' umbenannt' : '', '', 3],
+     ['Konflikte', d.conflicts, d.skipped ? '+ ' + d.skipped + ' übersprungen' : '', d.conflicts ? 'warn' : '', 5],
+     ['Fehler', d.errors, '', d.errors ? 'err' : '', 6]].forEach(function (t) {
+      var b = el('button', 'tile' + (t[3] ? ' ' + t[3] : ''));
+      b.type = 'button';
+      b.appendChild(el('div', 'l', t[0]));
+      b.appendChild(el('div', 'v', String(t[1])));
+      if (t[2]) b.appendChild(el('div', 's', t[2]));
+      b.addEventListener('click', function () {
+        var f = t[4];
+        // "Kopiert": die Richtung mit Einträgen wählen
+        if (f === 1 && !state.log.entries.some(function (e) { return logIn(e, 1); })) f = 2;
+        if (!state.log.entries.some(function (e) { return logIn(e, f); }) && f !== 6) f = 0;
+        setLogFilter(f);
+      });
+      tiles.appendChild(b);
+    });
+    box.appendChild(tiles);
+  }
+
+  function setLogFilter(f) {
+    state.logFilter = f;
+    state.logShown = LOG_PAGE;
+    renderLogChips();
+    renderLogList();
+  }
+
+  function renderLogChips() {
+    var d = state.log, box = $('log-chips');
+    box.innerHTML = '';
+    LOG_FILTERS.forEach(function (name, i) {
+      var n = 0;
+      d.entries.forEach(function (e) { if (logIn(e, i)) n++; });
+      if (i !== 0 && i !== 6 && n === 0 && state.logFilter !== i) return;
+      if (i === 1) name = '→ Nach ' + d.sideB;
+      if (i === 2) name = '← Nach ' + d.sideA;
+      var b = el('button', '', name);
+      b.type = 'button';
+      b.setAttribute('aria-pressed', state.logFilter === i ? 'true' : 'false');
+      b.appendChild(el('span', 'n' + (i === 6 && n ? ' err' : ''), String(n)));
+      b.addEventListener('click', function () { setLogFilter(i); });
+      box.appendChild(b);
+      if (state.logFilter === i && i > 0) setTimeout(function () { try { b.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (x) { } }, 0);
+    });
+  }
+
+  function renderLogList() {
+    var d = state.log, q = $('log-search').value.trim().toLowerCase();
+    var list = d.entries.filter(function (e) {
+      return logIn(e, state.logFilter) && (!q || (e[3] + ' ' + e[4] + ' ' + e[2]).toLowerCase().indexOf(q) >= 0);
+    });
+    var frag = document.createDocumentFragment();
+    list.slice(0, state.logShown).forEach(function (e) {
+      var r = el('div', 'lrow' + (e[1] === 'Error' ? ' err' : ''));
+      var top = el('div', 'lhead');
+      top.appendChild(el('span', 'time', e[0]));
+      top.appendChild(el('span', 'chip ' + logChipClass(e[1]), e[2]));
+      r.appendChild(top);
+      if (e[3]) r.appendChild(el('div', 'p' + (e[5] ? '' : (e[1] === 'Script' || e[1] === 'ScriptOut' ? ' mono' : ' msg')), e[3]));
+      if (e[4]) r.appendChild(el('div', 'd', e[4]));
+      frag.appendChild(r);
+    });
+    var box = $('log-list');
+    box.innerHTML = '';
+    if (!list.length) box.appendChild(el('div', 'lempty', q ? 'Nichts gefunden.' : state.logFilter === 6 ? 'Keine Fehler – alles in Ordnung.' : 'Keine Einträge.'));
+    box.appendChild(frag);
+    var rest = list.length - state.logShown;
+    $('log-more').hidden = rest <= 0;
+    $('log-more').textContent = 'Weitere ' + Math.min(rest, LOG_PAGE) + ' anzeigen (noch ' + rest + ')';
+  }
+
+  $('log-more').addEventListener('click', function () { state.logShown += LOG_PAGE; renderLogList(); });
+  var logSearchTimer = null;
+  $('log-search').addEventListener('input', function () {
+    clearTimeout(logSearchTimer);
+    logSearchTimer = setTimeout(function () { if (state.log) { state.logShown = LOG_PAGE; renderLogList(); } }, 250);
+  });
+  $('log-raw').addEventListener('click', function () {
+    var raw = $('log-text').hidden;
+    $('log-text').hidden = !raw;
+    ['log-sum', 'log-chips', 'log-search', 'log-list'].forEach(function (id) { $(id).hidden = raw; });
+    $('log-more').hidden = raw || $('log-more').hidden;
+    if (!raw && state.log) renderLogList();
+    this.textContent = raw ? 'Übersichtlich anzeigen' : 'Als Text anzeigen';
+  });
 
   // ---------- Auswahlblatt ----------
 

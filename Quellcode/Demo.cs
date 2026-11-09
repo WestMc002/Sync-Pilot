@@ -148,6 +148,67 @@ namespace SyncPilot
             return an;
         }
 
+        /// <summary>Beispielprotokoll für den Screenshot der Protokollansicht (aus der Beispiel-Analyse).</summary>
+        public static List<string> SampleLog(SyncJob job, HistoryEntry h)
+        {
+            if (job == null) job = Jobs().First();
+            Analysis an = CreateAnalysis(job);
+            DateTime t = h != null ? h.Start : DateTime.Now;
+            List<string> lines = new List<string>();
+            Action<string> add = delegate (string s) { lines.Add(t.ToString("HH:mm:ss") + "  " + s); t = t.AddSeconds(1); };
+            add("Sync Pilot " + Runner.Version + " – Aufgabe: " + job.Name);
+            add(job.SideName(true) + ": " + job.FolderA + "  (" + an.FilesA.ToString("N0") + " Dateien, " + Fmt.Size(an.BytesA) + ")");
+            add(job.SideName(false) + ": " + job.FolderB + "  (" + an.FilesB.ToString("N0") + " Dateien, " + Fmt.Size(an.BytesB) + ")");
+            add("Modus: " + job.ModeText + ", Löschen in den Papierkorb");
+            add("Skript vor dem Kopieren: sichern.cmd");
+            add("Skript:   3 Dateien gesichert");
+            add("Skript beendet, Rückgabewert 0");
+            int copied = 0, moved = 0, deleted = 0, conflicts = 0, skipped = 0, errors = 0;
+            bool failed = false;
+            foreach (PlanItem it in an.Actions)
+            {
+                switch (it.Chosen)
+                {
+                    case ActionKind.NachB:
+                    case ActionKind.NachA:
+                    {
+                        string dir = job.Sides(it.Chosen == ActionKind.NachB ? "A \u2192 B" : "B \u2192 A");
+                        if (!failed && !it.IsDir && it.Chosen == ActionKind.NachB)
+                        {
+                            failed = true;
+                            errors++;
+                            add("FEHLER bei " + it.Rel + ": Der Prozess kann nicht auf die Datei zugreifen, da sie von einem anderen Prozess verwendet wird.");
+                            break;
+                        }
+                        copied++;
+                        add((it.IsDir ? "Ordner angelegt (" : "Kopiert (") + dir + "): " + it.Rel);
+                        break;
+                    }
+                    case ActionKind.LoeschenA:
+                    case ActionKind.LoeschenB:
+                        deleted++;
+                        add((it.IsDir ? "Ordner gelöscht (" : "Gelöscht (") + job.SideName(it.Chosen == ActionKind.LoeschenA) + ", Papierkorb): " + it.Rel);
+                        break;
+                    case ActionKind.UmbenennenA:
+                    case ActionKind.UmbenennenB:
+                        moved++;
+                        add("Umbenannt/verschoben (" + job.SideName(it.Chosen == ActionKind.UmbenennenA) + "): " + (it.From ?? it.Rel) + " \u2192 " + it.Rel);
+                        break;
+                    case ActionKind.Konflikt:
+                        conflicts++;
+                        add("Konflikt, übersprungen (" + job.Sides(it.Reason) + "): " + it.Rel);
+                        break;
+                    default:
+                        skipped++;
+                        add("Übersprungen: " + it.Rel);
+                        break;
+                }
+            }
+            add("Ergebnis: " + copied + " kopiert, " + (moved > 0 ? moved + " umbenannt/verschoben, " : "") + deleted + " gelöscht, " +
+                conflicts + " Konflikte, " + skipped + " übersprungen, " + errors + " Fehler");
+            return lines;
+        }
+
         // ---------- Screenshots ----------
 
         public static bool RunScreenshots(string outDir)
@@ -183,6 +244,8 @@ namespace SyncPilot
                             Path.Combine(outDir, "aufgabe-" + suffix + ".png"));
                         Shot(backdrop, delegate { return Window(delegate (MainForm f) { f.Navigate(new HistoryView(f)); }); },
                             Path.Combine(outDir, "verlauf-" + suffix + ".png"));
+                        Shot(backdrop, delegate { return Window(delegate (MainForm f) { f.ShowLog(SampleEntry(f, analyseJob), true); }); },
+                            Path.Combine(outDir, "protokoll-" + suffix + ".png"));
                         Shot(backdrop, delegate { return AboutDialog.CreateForScreenshot(); }, Path.Combine(outDir, "info-" + suffix + ".png"));
                     }
                 }
@@ -198,6 +261,26 @@ namespace SyncPilot
                 Theme.Override = null;
                 Active = false;
             }
+        }
+
+        /// <summary>Lauf der Analyse-Aufgabe aus dem Beispielverlauf (oder ein neuer) für den Protokoll-Screenshot.</summary>
+        private static HistoryEntry SampleEntry(MainForm f, SyncJob job)
+        {
+            SyncJob j = FindJob(f, job);
+            HistoryEntry h = History().FirstOrDefault(x => x.JobId == j.Id);
+            if (h == null)
+            {
+                h = new HistoryEntry();
+                h.Start = DateTime.Now.AddMinutes(-12);
+                h.JobId = j.Id;
+                h.JobName = j.Name;
+                h.Seconds = 14;
+            }
+            // passend zum Beispielprotokoll: ein Fehler
+            h.Errors = 1;
+            h.Result = "1 Fehler";
+            h.Cancelled = false;
+            return h;
         }
 
         private static SyncJob FindJob(MainForm f, SyncJob job)

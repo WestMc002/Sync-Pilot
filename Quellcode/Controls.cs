@@ -196,6 +196,9 @@ namespace SyncPilot
         {
             // Ist das Feld (auch nur teilweise) zu sehen – also z. B. gerade angeklickt –, nicht blättern.
             // Nur wenn es ganz außerhalb liegt (Tab-Taste), wie gewohnt dorthin blättern.
+            // Mausklick: nie blättern. Beim ersten Klick in die Ansicht gibt Windows den Fokus zunächst dem
+            // ersten Feld der Seite (ganz oben) – das ließ die Seite nach oben springen.
+            if (Control.MouseButtons != MouseButtons.None) return DisplayRectangle.Location;
             try
             {
                 if (activeControl != null && activeControl.IsHandleCreated)
@@ -562,6 +565,158 @@ namespace SyncPilot
             base.OnHandleCreated(e);
             Theme.DarkScroll(this);
             Theme.DarkHeader(this);
+            try
+            {
+                IntPtr h = SendMessage(Handle, 0x101F, IntPtr.Zero, IntPtr.Zero); // LVM_GETHEADER
+                if (h != IntPtr.Zero)
+                {
+                    headerHook = new HeaderHook(this);
+                    headerHook.AssignHandle(h);
+                }
+            }
+            catch { headerHook = null; }
+        }
+
+        protected override void OnHandleDestroyed(EventArgs e)
+        {
+            if (headerHook != null) { headerHook.ReleaseHandle(); headerHook = null; }
+            base.OnHandleDestroyed(e);
+        }
+
+        // ---------- Abgeschnittenen Text beim Darüberfahren zeigen (Zellen und Spaltenköpfe) ----------
+
+        /// <summary>Optional: eigener Text für den Hinweis einer Zelle (Zeile, Spalte); null = Text der Zelle.</summary>
+        public Func<int, int, string> TipText;
+        ToolTip tip;
+        System.Windows.Forms.Timer tipTimer;
+        string tipKey, tipPending;
+        HeaderHook headerHook;
+
+        void SetTip(string key, string text)
+        {
+            if (key == tipKey) return;
+            tipKey = key;
+            tipPending = text;
+            if (tip == null)
+            {
+                tip = new ToolTip();
+                tipTimer = new System.Windows.Forms.Timer();
+                tipTimer.Interval = 450;
+                tipTimer.Tick += delegate
+                {
+                    tipTimer.Stop();
+                    if (tipPending == null || IsDisposed) return;
+                    Point p = PointToClient(Cursor.Position);
+                    tip.Show(tipPending, this, p.X + Theme.P(12), p.Y + Theme.P(22), 15000);
+                };
+            }
+            tipTimer.Stop();
+            tip.Hide(this);
+            if (text != null) tipTimer.Start();
+        }
+
+        bool Cut(string text, Font f, int width)
+        {
+            if (string.IsNullOrEmpty(text)) return false;
+            return TextRenderer.MeasureText(text, f, Size.Empty, TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding | TextFormatFlags.SingleLine).Width
+                   > width - Theme.P(20);
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            string key = null, text = null;
+            try
+            {
+                ListViewHitTestInfo hi = HitTest(e.Location);
+                if (hi.Item != null && hi.SubItem != null)
+                {
+                    int col = hi.Item.SubItems.IndexOf(hi.SubItem);
+                    if (col >= 0 && col < Columns.Count)
+                    {
+                        key = hi.Item.Index + ":" + col;
+                        string t = TipText != null ? TipText(hi.Item.Index, col) : null;
+                        if (t == null) t = Cut(hi.SubItem.Text, Font, Columns[col].Width) ? hi.SubItem.Text : null;
+                        text = t;
+                    }
+                }
+            }
+            catch { }
+            SetTip(key, text);
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            base.OnMouseLeave(e);
+            SetTip(null, null);
+        }
+
+        [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "SendMessage")]
+        static extern IntPtr SendMessageRect(IntPtr hWnd, int msg, IntPtr wParam, ref RECT lParam);
+
+        void HeaderHover(IntPtr header, int x)
+        {
+            if (x < 0) { SetTip(null, null); return; }
+            for (int i = 0; i < Columns.Count; i++)
+            {
+                RECT r = new RECT();
+                SendMessageRect(header, 0x1207, (IntPtr)i, ref r); // HDM_GETITEMRECT
+                if (x >= r.Left && x < r.Right)
+                {
+                    string t = Columns[i].Text;
+                    SetTip("h" + i, Cut(t, Theme.Bold, r.Right - r.Left) ? t : null);
+                    return;
+                }
+            }
+            SetTip(null, null);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                if (tipTimer != null) { tipTimer.Stop(); tipTimer.Dispose(); }
+                if (tip != null) tip.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+
+        /// <summary>Mausbewegung über den Spaltenköpfen (eigenes Fenster) an die Liste melden.</summary>
+        class HeaderHook : NativeWindow
+        {
+            readonly ThemedListView owner;
+            bool tracking;
+
+            [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+            struct TRACKMOUSEEVENT { public int cbSize, dwFlags; public IntPtr hwndTrack; public int dwHoverTime; }
+
+            [System.Runtime.InteropServices.DllImport("user32.dll")]
+            static extern bool TrackMouseEvent(ref TRACKMOUSEEVENT t);
+
+            public HeaderHook(ThemedListView owner) { this.owner = owner; }
+
+            protected override void WndProc(ref Message m)
+            {
+                if (m.Msg == 0x0200) // WM_MOUSEMOVE
+                {
+                    if (!tracking)
+                    {
+                        TRACKMOUSEEVENT t = new TRACKMOUSEEVENT();
+                        t.cbSize = System.Runtime.InteropServices.Marshal.SizeOf(typeof(TRACKMOUSEEVENT));
+                        t.dwFlags = 0x2; // TME_LEAVE
+                        t.hwndTrack = m.HWnd;
+                        tracking = TrackMouseEvent(ref t);
+                    }
+                    int x = (short)(m.LParam.ToInt64() & 0xFFFF);
+                    try { owner.HeaderHover(m.HWnd, x); } catch { }
+                }
+                else if (m.Msg == 0x02A3) // WM_MOUSELEAVE
+                {
+                    tracking = false;
+                    try { owner.HeaderHover(m.HWnd, -1); } catch { }
+                }
+                base.WndProc(ref m);
+            }
         }
 
         protected override void OnResize(EventArgs e)

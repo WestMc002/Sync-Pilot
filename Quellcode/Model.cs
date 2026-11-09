@@ -160,6 +160,18 @@ namespace SyncPilot
         public string AvailDrive;
         public int AvailInterval = 10;
         public int AvailDelay = 10;
+        /// <summary>Durch Ereignisse höchstens alle x Minuten starten (0 = ohne Begrenzung); frühere Anlässe werden danach nachgeholt.</summary>
+        public int EventMinGap;
+        /// <summary>Durch Ereignisse gestartet und nichts zu tun: still auslassen (kein Eintrag im Verlauf, kein Protokoll, keine Skripte).</summary>
+        public bool EventOnlyChanges = true;
+
+        public static string GapText(int minutes)
+        {
+            if (minutes <= 0) return "Ohne Begrenzung";
+            if (minutes < 60) return minutes + " Minuten";
+            if (minutes % 60 != 0) return minutes + " Minuten";
+            return minutes == 60 ? "1 Stunde" : (minutes / 60) + " Stunden";
+        }
 
         /// <summary>Beim Einlesen umgestellter Zeitplan: muss in der Aufgabenplanung neu eingerichtet werden.</summary>
         [XmlIgnore] public bool NeedsReapply;

@@ -74,8 +74,10 @@ namespace SyncPilot
             int pad = Theme.P(24), iconW = icon == MessageBoxIcon.None ? 0 : Theme.P(44);
             TextFormatFlags tf = TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix;
             // Breite nach Text: mindestens 420, höchstens 600 (lange Zeilen werden umbrochen)
-            int natural = TextRenderer.MeasureText(text, Theme.Body, new Size(Theme.P(560), 0), tf).Width;
-            int tw = Math.Max(Theme.P(340), Math.Min(Theme.P(560), natural + Theme.P(8)));
+            // (Fensterbreite = Text + Symbol + Ränder, daher hier Textbreite = Fensterbreite - Ränder - Symbol)
+            int minTw = Theme.P(420) - 2 * pad - iconW, maxTw = Theme.P(600) - 2 * pad - iconW;
+            int natural = TextRenderer.MeasureText(text, Theme.Body, new Size(maxTw, 0), tf).Width;
+            int tw = Math.Max(minTw, Math.Min(maxTw, natural + Theme.P(8)));
             int W = pad + iconW + tw + pad, x0 = pad + iconW;
 
             if (icon != MessageBoxIcon.None)

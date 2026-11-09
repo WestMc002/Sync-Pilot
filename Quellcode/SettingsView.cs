@@ -28,7 +28,7 @@ namespace SyncPilot
         readonly ChoiceBox cbLogDays, cbAfterAll;
         static readonly string[] AfterAllKeys = { "Nichts", "Herunterfahren", "Ruhezustand", "Energiesparen" };
         static readonly int[] LogDayChoices = { 7, 14, 30, 90, 180, 365, 0 };
-        readonly ToggleSwitch tBackground, tAutostart, tExplorer, tWeb, tHttps, tInternet;
+        readonly ToggleSwitch tBackground, tAutostart, tAskBg, tExplorer, tWeb, tHttps, tInternet;
 
         // Steuerung per Handy
         readonly InputBox port, address;
@@ -82,9 +82,13 @@ namespace SyncPilot
                 "Beim Schließen des Fensters läuft Sync Pilot unten rechts im Infobereich weiter – nötig für den Handy-Zugriff.");
             tAutostart = Row(cBack, 1, "Mit Windows starten",
                 "Startet nach der Anmeldung unsichtbar im Infobereich.");
+            // Rückfrage beim Speichern von Aufgaben mit Ereignissen (dort per „Nicht mehr fragen“ abschaltbar)
+            tAskBg = Row(cBack, 2, "Bei Aufgaben mit Ereignissen nachfragen",
+                "Fragt beim Speichern, ob Sync Pilot im Hintergrund und mit Windows laufen soll, solange das noch aus ist.");
             tBackground.Checked = s.Background;
             tAutostart.Checked = s.Autostart;
-            cBack.Height = Theme.P(56 + 2 * 64 + 12);
+            tAskBg.Checked = !s.NoAskBackground;
+            cBack.Height = Theme.P(56 + 3 * 64 + 12);
 
             // ---------- Explorer ----------
             cExplorer = Section("Explorer");
@@ -258,6 +262,7 @@ namespace SyncPilot
 
             tBackground.CheckedChanged += delegate { MarkDirty(); };
             tAutostart.CheckedChanged += delegate { MarkDirty(); };
+            tAskBg.CheckedChanged += delegate { MarkDirty(); };
             tExplorer.CheckedChanged += delegate { MarkDirty(); };
             foreach (InputBox b in new InputBox[] { certFile, keyFile, certPass, certName })
                 b.Box.TextChanged += delegate { MarkDirty(); };
@@ -478,7 +483,7 @@ namespace SyncPilot
             laying = true;
             try
             {
-                int pad = Theme.P(32), gap = Theme.P(16);
+                int pad = Theme.P(28), gap = Theme.P(16);
                 int W = Math.Max(Theme.P(420), Math.Min(scroll.ClientSize.Width - 2 * pad, Theme.P(1200)));
                 int y0 = scroll.AutoScrollPosition.Y;
                 title.Location = new Point(pad - Theme.P(3), y0 + Theme.P(20));
@@ -514,11 +519,11 @@ namespace SyncPilot
                     cOpen.SetBounds(pad, ly + gap, rightW, openH);
                     y = cOpen.Bottom;
                 }
-                // Speichern als Primärknopf links neben Abbrechen, rechtsbündig unter den Karten
+                // "Abbrechen" links, "Speichern" (primär) ganz rechts, 10 Abstand; links davon die Fehlerzeile
                 y += gap + Theme.P(4);
-                btnCancel.Location = new Point(pad + W - btnCancel.Width, y);
-                btnSave.Location = new Point(btnCancel.Left - Theme.P(10) - btnSave.Width, y);
-                saveMsg.SetBounds(pad, y, Math.Max(Theme.P(40), btnSave.Left - pad - Theme.P(12)), btnSave.Height);
+                btnSave.Location = new Point(pad + W - btnSave.Width, y);
+                btnCancel.Location = new Point(btnSave.Left - Theme.P(10) - btnCancel.Width, y);
+                saveMsg.SetBounds(pad, y, Math.Max(Theme.P(40), btnCancel.Left - pad - Theme.P(12)), btnSave.Height);
                 y += btnSave.Height;
                 scroll.AutoScrollMinSize = new Size(0, y + Theme.P(24) - y0);
             }
@@ -774,6 +779,7 @@ namespace SyncPilot
 
             s.Background = tBackground.Checked;
             s.Autostart = tAutostart.Checked;
+            s.NoAskBackground = !tAskBg.Checked;
             s.ExplorerEntry = tExplorer.Checked;
             s.LogDays = logDays;
             s.AfterAll = AfterAllKeys[Math.Max(0, Math.Min(AfterAllKeys.Length - 1, cbAfterAll.SelectedIndex))];
@@ -1180,7 +1186,7 @@ namespace SyncPilot
             FlatButton cancel = new FlatButton("Abbrechen", null, BtnKind.Secondary);
             ok.Width = Math.Max(ok.Width, Theme.P(90));
             ok.Location = new Point(W - pad - ok.Width, y);
-            cancel.Location = new Point(ok.Left - Theme.P(8) - cancel.Width, y);
+            cancel.Location = new Point(ok.Left - Theme.P(10) - cancel.Width, y);
             ok.Click += delegate
             {
                 if (p1.Text.Length < minLength) { error.Text = "Mindestens " + minLength + " Zeichen."; return; }

@@ -30,6 +30,8 @@ namespace SyncPilot
         public virtual void RequestCancel() { }
         public virtual void ApplySearch(string text) { }
         public virtual string NavKey { get { return ""; } }
+        /// <summary>Welcher Eintrag links hervorgehoben wird (z. B. Protokoll: "history" oder "tasks").</summary>
+        public virtual string NavHighlight { get { return NavKey; } }
     }
 
     public class MainForm : Form
@@ -185,7 +187,7 @@ namespace SyncPilot
             updateHost = new Panel();
             updateHost.Dock = DockStyle.Top;
             updateHost.BackColor = Theme.Bg;
-            updateHost.Padding = new Padding(Theme.P(32), Theme.P(16), Theme.P(32), 0);
+            updateHost.Padding = new Padding(Theme.P(28), Theme.P(16), Theme.P(28), 0);
             updateHost.Height = Theme.P(16) + updateBar.Height;
             updateHost.Visible = false;
             updateHost.Controls.Add(updateBar);
@@ -195,7 +197,7 @@ namespace SyncPilot
             noticeHost = new Panel();
             noticeHost.Dock = DockStyle.Top;
             noticeHost.BackColor = Theme.Bg;
-            noticeHost.Padding = new Padding(Theme.P(32), Theme.P(12), Theme.P(32), 0);
+            noticeHost.Padding = new Padding(Theme.P(28), Theme.P(12), Theme.P(28), 0);
             noticeHost.Height = Theme.P(12 + 40);
             noticeHost.Visible = false;
             notice = new Label();
@@ -578,9 +580,9 @@ namespace SyncPilot
                 old.Dispose();
             }
             host.ResumeLayout();
-            navTasks.Selected = v.NavKey == "tasks";
-            navHistory.Selected = v.NavKey == "history";
-            navSettings.Selected = v.NavKey == "settings";
+            navTasks.Selected = v.NavHighlight == "tasks";
+            navHistory.Selected = v.NavHighlight == "history";
+            navSettings.Selected = v.NavHighlight == "settings";
             search.Visible = v.NavKey == "tasks";
             if (search.Visible && search.Text.Length > 0) v.ApplySearch(search.Text);
             v.Focus();
@@ -590,6 +592,8 @@ namespace SyncPilot
         public void ShowTasks() { Navigate(new TasksView(this)); }
         public void ShowAnalysis(SyncJob job, bool autoSync) { Navigate(new AnalysisView(this, job, autoSync)); }
         public void ShowEdit(SyncJob job) { Navigate(new EditView(this, job)); }
+        /// <summary>Protokoll eines Laufs grafisch; fromHistory: "Zurück" führt in den Verlauf, sonst zu den Aufgaben.</summary>
+        public void ShowLog(HistoryEntry h, bool fromHistory) { if (h != null) Navigate(new LogView(this, h, fromHistory)); }
 
         // ---------- Updates (GitHub-Releases) ----------
 

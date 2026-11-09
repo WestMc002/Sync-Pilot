@@ -815,7 +815,7 @@ namespace SyncPilot
         {
             base.OnLayout(e);
             if (title == null || list == null) return;
-            int pad = Theme.P(32), W = ClientSize.Width, H = ClientSize.Height;
+            int pad = Theme.P(28), W = ClientSize.Width, H = ClientSize.Height;
             title.Location = new Point(pad - Theme.P(3), Theme.P(22));
             subtitle.Location = new Point(pad, title.Bottom + Theme.P(2));
             btnNew.Location = new Point(W - pad - btnNew.Width, Theme.P(30));
@@ -960,7 +960,7 @@ namespace SyncPilot
             m.Items.Add(mb.Item(job.SideTitle(false) + " \u00f6ffnen", MenuHelper.Folder, delegate { Ui.Explore(Paths.TryResolve(job.FolderB), false); }));
             GlyphMenuItem log = mb.Item("Letztes Protokoll \u00f6ffnen", MenuHelper.Document, delegate
             {
-                if (last != null) Ui.Open(last.LogFile);
+                if (last != null) Main.ShowLog(last, false);
             });
             log.Enabled = last != null && !string.IsNullOrEmpty(last.LogFile) && File.Exists(last.LogFile);
             m.Items.Add(log);

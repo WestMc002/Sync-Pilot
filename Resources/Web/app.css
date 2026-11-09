@@ -149,6 +149,40 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
   background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; cursor: pointer; }
 .run:disabled { cursor: default; }
 .run .sub { font-size: 12px; color: var(--muted); }
+/* Ergebnis-Plakette nur so groß wie ihr Text, oben rechts (nicht über die ganze Zellenhöhe/-breite gezogen) */
+.run > .chip { justify-self: end; align-self: start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+/* Ordner der Aufgabe über die ganze Breite unter dem Namen */
+.run .side { grid-column: 1 / -1; font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Protokoll: Kopf mit Ergebnis und Kacheln, Filter, Einträge */
+.logsub { margin: -6px 0 12px; font-size: 13px; }
+.logsum { padding: 12px; margin-bottom: 12px; }
+.logsum .res { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.logsum .mode { font-size: 13px; color: var(--muted); margin: 6px 0 10px; }
+.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.tile { background: var(--bg); border-radius: 8px; padding: 8px 10px; border: 0; text-align: left; font: inherit; color: var(--text); cursor: pointer; }
+.tile .l { font-size: 12px; color: var(--muted); }
+.tile .v { font-size: 24px; font-weight: 600; line-height: 1.2; }
+.tile .s { font-size: 12px; color: var(--muted); }
+.tile.warn { background: var(--warn-bg); } .tile.warn .v { color: var(--warn); }
+.tile.err { background: var(--err-bg); } .tile.err .v { color: var(--err); }
+.logsearch { width: 100%; font: inherit; min-height: 40px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--card); color: var(--text); margin-bottom: 10px; }
+.loglist { background: var(--card); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.loglist:empty { display: none; }
+.lrow { padding: 8px 12px; border-top: 1px solid var(--border); }
+.lrow:first-child { border-top: 0; }
+.lrow.err { background: var(--err-bg); }
+.lrow .lhead { display: flex; align-items: center; gap: 8px; }
+.lrow .time { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.lrow .chip { max-width: 70vw; overflow: hidden; text-overflow: ellipsis; }
+.lrow .p { font-size: 14px; word-break: break-word; margin-top: 3px; }
+.lrow .p.msg { color: var(--muted); }
+.lrow .p.mono { font-family: "Cascadia Mono", Consolas, ui-monospace, monospace; font-size: 12px; }
+.lrow .d { font-size: 12px; color: var(--muted); margin-top: 2px; word-break: break-word; }
+.lrow.err .d { color: var(--err); }
+.lrow.err .chip { background: var(--card); }
+.lempty { padding: 16px; text-align: center; color: var(--muted); }
+.logmore { width: 100%; margin-top: 10px; }
 .log { white-space: pre-wrap; word-break: break-all; font: 12px/1.45 "Cascadia Mono", Consolas, ui-monospace, monospace; max-height: none; }
 
 .tabs { position: fixed; left: 0; right: 0; bottom: 0; display: flex; background: var(--card); border-top: 1px solid var(--border);
@@ -183,3 +217,14 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 .chips .n.warn, .chips .n.err { color: var(--bg); opacity: 1; padding: 0 6px; border-radius: 9px; }
 .chips .n.warn { background: var(--warn); }
 .chips .n.err { background: var(--err); }
+/* Aufgaben: Live-Aktualisierung an/aus */
+.h1row { display: flex; align-items: center; gap: 8px; }
+.h1row h1 { flex: 1; min-width: 0; }
+.live { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 12px; border-radius: 18px;
+  border: 1px solid var(--border); background: var(--card); color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+.live[aria-pressed="true"] .live-dot { animation: pulse 2s ease-in-out infinite; }
+.live[aria-pressed="false"] .live-dot { background: var(--muted); }
+.live[aria-pressed="false"] { color: var(--muted); }
+#refresh-now svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+@media (prefers-reduced-motion: reduce) { .live-dot { animation: none !important; } }

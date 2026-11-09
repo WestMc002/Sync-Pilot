@@ -17,6 +17,7 @@ Im Design von Windows 11 (hell und dunkel, mit der Windows-Akzentfarbe), mit Vor
 | ![Analyse hell](Screenshots/analyse-hell.png) | ![Analyse dunkel](Screenshots/analyse-dunkel.png) |
 | ![Aufgabe bearbeiten hell](Screenshots/aufgabe-hell.png) | ![Aufgabe bearbeiten dunkel](Screenshots/aufgabe-dunkel.png) |
 | ![Verlauf hell](Screenshots/verlauf-hell.png) | ![Verlauf dunkel](Screenshots/verlauf-dunkel.png) |
+| ![Protokoll hell](Screenshots/protokoll-hell.png) | ![Protokoll dunkel](Screenshots/protokoll-dunkel.png) |
 | ![Info hell](Screenshots/info-hell.png) | ![Info dunkel](Screenshots/info-dunkel.png) |
 
 Die Screenshots zeigen erfundene Beispieldaten. Sie entstehen automatisch beim Erstellen (`"Sync Pilot.exe" --screenshots`).
@@ -35,9 +36,9 @@ Die Screenshots zeigen erfundene Beispieldaten. Sie entstehen automatisch beim E
 - **Filter** – Negativ- und Positivliste, je für Dateien und Ordner, mit Platzhaltern und festen Pfaden; Dateigröße als Filter
 - **Optionen** – Löschungen übernehmen, Papierkorb statt endgültig löschen, versteckte Dateien, Inhalt vergleichen
 - **Zeitplan** – feste Uhrzeiten mit Wochentagen oder alle x Minuten/Stunden, bei Anmeldung; verpasste Termine nachholen, ohne Verbindung still auslassen (über die Windows-Aufgabenplanung, läuft auch bei geschlossenem Programm)
-- **Bei Ereignissen starten** – Änderungen in Ordner A oder B, Trigger-Datei, Ordner, Computer oder Laufwerk wird verfügbar
+- **Bei Ereignissen starten** – Änderungen in Ordner A oder B, Trigger-Datei, Ordner, Computer oder Laufwerk wird verfügbar; auf Wunsch höchstens alle x Stunden und nur, wenn sich etwas geändert hat
 - **Steuerung per Handy** – Aufgaben und Verlauf als Webseite für Handy und Tablet (keine App nötig), Anmeldung per QR-Code oder Kennwort, optional verschlüsselt mit eigenem Zertifikat
-- **Verlauf und Protokolle** – jeder Lauf mit Ergebnis, Protokolle werden nach 30 Tagen gelöscht (einstellbar)
+- **Verlauf und Protokolle** – jeder Lauf mit Ergebnis; Protokolle übersichtlich mit Kacheln, Filtern, Suche und rot markierten Fehlern (auch auf dem Handy), Datei öffnen oder Inhalt vergleichen per Rechtsklick; Protokolle werden nach 30 Tagen gelöscht (einstellbar)
 - **Weiteres** – Verknüpfungen für einzelne Aufgaben, Explorer-Kontextmenü, Hintergrundbetrieb im Infobereich, Start mit Windows, Update-Prüfung über GitHub mit „Jetzt aktualisieren“
 
 ## Installation

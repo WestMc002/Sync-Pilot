@@ -1,4 +1,4 @@
-// Sync Pilot – Analyse und Ausführung des Abgleichs
+﻿// Sync Pilot – Analyse und Ausführung des Abgleichs
 // Copyright (C) 2026 Günther Schoder · https://www.westmc002.de
 // Lizenz: GNU General Public License v3.0 oder später (siehe LICENSE)
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -1608,6 +1608,12 @@ namespace SyncPilot
 
         public static HistoryEntry Run(SyncJob job, bool scheduled, Func<bool> cancel, Action<string> status)
         {
+            return Run(job, scheduled, cancel, status, false);
+        }
+
+        /// <summary>quietIfNothing: ist nichts zu tun, null zurückgeben – ohne Verlauf, Protokoll und Skripte (Ereignisse).</summary>
+        public static HistoryEntry Run(SyncJob job, bool scheduled, Func<bool> cancel, Action<string> status, bool quietIfNothing)
+        {
             // Sperrdatei schon vor der Analyse holen (sonst könnte sich zwischen Analyse und Kopieren etwas ändern);
             // automatische Läufe warten bis zu 30 Minuten, manuelle brechen sofort ab
             LockFiles lk;
@@ -1624,6 +1630,7 @@ namespace SyncPilot
                 {
                     return Fail(job, scheduled, ex is OperationCanceledException ? null : ex.Message);
                 }
+                if (quietIfNothing && !an.Actions.Any(x => x.Chosen != ActionKind.Keine) && an.ScanErrors.Count == 0 && an.StateNote == null) return null;
                 string warn = Engine.SafetyCheck(an);
                 if (warn != null) return Fail(job, scheduled, "Sicherheitsstopp: " + warn);
                 return ExecuteAnalysis(an, scheduled, cancel,
