@@ -1,4 +1,4 @@
-// Sync Pilot – Einstellungen (Hintergrund, Explorer, Handy-Zugriff)
+﻿// Sync Pilot – Einstellungen (Hintergrund, Explorer, Handy-Zugriff)
 // Copyright (C) 2026 Günther Schoder · https://www.westmc002.de
 // Lizenz: GNU General Public License v3.0 oder später (siehe LICENSE)
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -336,6 +336,10 @@ namespace SyncPilot
                 return;
             }
             Cursor = Cursors.Default;
+            // nicht lesbare Aufgaben nicht still verschlucken
+            string skippedText = Easy2SyncImport.LastSkipped.Count == 0 ? "" :
+                "\n\nNicht übernommen:\n" + string.Join("\n", Easy2SyncImport.LastSkipped.Take(10).Select(x => "• " + x)) +
+                (Easy2SyncImport.LastSkipped.Count > 10 ? "\n• … und " + (Easy2SyncImport.LastSkipped.Count - 10) + " weitere" : "");
 
             // Gruppen und kurze Namen vorschlagen ("Sync PC <-> NAS (Dokumente)" -> Gruppe "NAS", Name "Dokumente")
             int canGroup = 0;
@@ -373,7 +377,7 @@ namespace SyncPilot
             if (fresh.Count == 0)
             {
                 MessageBox.Show(found.Count == 0 ? "In der Datei wurden keine Aufgaben gefunden."
-                    : "Alle " + found.Count + " Aufgaben gibt es in Sync Pilot schon (gleicher Name und gleiche Gruppe).", "Sync Pilot", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    : "Alle " + found.Count + " Aufgaben gibt es in Sync Pilot schon (gleicher Name und gleiche Gruppe)." + skippedText, "Sync Pilot", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
             StringBuilder sb = new StringBuilder();
@@ -386,7 +390,7 @@ namespace SyncPilot
             sb.AppendLine();
             sb.AppendLine("Übernommen werden sie ohne Zeitplan (nur manuell). Der erste Lauf gleicht ab wie beim ersten Mal: " +
                 "Was nur auf einer Seite liegt, wird kopiert, nichts wird gelöscht. Bitte vorher „Analysieren“.");
-            if (MessageBox.Show(sb.ToString() + "\nJetzt übernehmen?", "Sync Pilot", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            if (MessageBox.Show(sb.ToString() + skippedText + "\n\nJetzt übernehmen?", "Sync Pilot", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
 
             List<string> notes = new List<string>();
             foreach (ImportedJob ij in fresh)

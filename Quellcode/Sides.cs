@@ -1,4 +1,4 @@
-// Sync Pilot – Seiten A und B: Windows-Ordner (lokal, Netzwerk), FTP- oder SFTP-Server
+﻿// Sync Pilot – Seiten A und B: Windows-Ordner (lokal, Netzwerk), FTP- oder SFTP-Server
 // Copyright (C) 2026 Günther Schoder · https://www.westmc002.de
 // Lizenz: GNU General Public License v3.0 oder später (siehe LICENSE)
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -324,9 +324,33 @@ namespace SyncPilot
             }
             // Pfad in der Adresse gilt ab dem Startordner nach der Anmeldung; "//pfad" = absolut ab der Wurzel
             string p = url.Path ?? "";
-            if (p.StartsWith("//")) basePath = p.Substring(1);
-            else basePath = (client.Home.TrimEnd('/') + "/" + p.TrimStart('/')).TrimEnd('/');
-            if (basePath.Length == 0) basePath = "/";
+            basePath = ResolveBase(p, client.Home, client.DirExists);
+        }
+
+        /// <summary>
+        /// Startordner auf dem Server: Der Pfad in der Adresse gilt ab dem Startordner nach der Anmeldung, "//pfad" ab der Wurzel.
+        /// Beginnt der Pfad schon mit dem Startordner („/home/benutzer/…“ bei Startordner /home/benutzer) oder gibt es ihn nur
+        /// ab der Wurzel, gilt er ebenfalls ab der Wurzel – so wie Easy2Sync und viele FTP-Programme Pfade verstehen.
+        /// </summary>
+        internal static string ResolveBase(string p, string home, Func<string, bool> dirExists)
+        {
+            p = p ?? "";
+            home = string.IsNullOrEmpty(home) ? "/" : home.TrimEnd('/');
+            if (p.StartsWith("//")) return Root(p.Substring(1));
+            if (home.Length > 0 && (p == home || p.StartsWith(home + "/"))) return Root(p);
+            string rel = Root(home + "/" + p.TrimStart('/'));
+            if (p.StartsWith("/") && p.Length > 1)
+            {
+                try { if (!dirExists(rel) && dirExists(Root(p))) return Root(p); }
+                catch { }
+            }
+            return rel;
+        }
+
+        static string Root(string s)
+        {
+            s = (s ?? "").TrimEnd('/');
+            return s.Length == 0 ? "/" : s;
         }
 
         string Full(string rel)
@@ -593,9 +617,7 @@ namespace SyncPilot
             }
             // wie bei FTP: Pfad gilt ab dem Startordner nach der Anmeldung; "//pfad" = absolut ab der Wurzel
             string p = url.Path ?? "";
-            if (p.StartsWith("//")) basePath = p.Substring(1);
-            else basePath = (client.Home.TrimEnd('/') + "/" + p.TrimStart('/')).TrimEnd('/');
-            if (basePath.Length == 0) basePath = "/";
+            basePath = FtpSide.ResolveBase(p, client.Home, client.DirExists);
         }
 
         string Full(string rel)

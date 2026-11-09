@@ -27,7 +27,7 @@ namespace SyncPilot
         readonly InputBox lockFile, scriptBefore, scriptAfter;
         readonly Label lNoDelA, lNoDelB, lWatchA, lWatchB;
         static readonly ConflictRule[] Rules = { ConflictRule.Fragen, ConflictRule.Neuer, ConflictRule.AGewinnt, ConflictRule.BGewinnt };
-        readonly FlatButton btnSwap, browseA, browseB, btnCancel, btnSaveAnalyze, btnSave, credA, credB;
+        readonly FlatButton btnSwap, browseA, browseB, btnCancel, btnSaveAnalyze, btnSave, credA, credB, groupPick;
         readonly DeviceCombo devA, devB;
         string userA, passA, userB, passB, certA, certB;
         readonly ModeCard mSync, mBackup, mMirror;
@@ -140,6 +140,10 @@ namespace SyncPilot
             groupBox.Box.AutoCompleteSource = AutoCompleteSource.CustomSource;
             groupBox.Box.AutoCompleteMode = AutoCompleteMode.SuggestAppend;
             Label lGroup = FieldLabel("Gruppe (optional)", groupBox);
+            // Pfeil rechts neben dem Feld: vorhandene Gruppen zum Auswählen (Eintippen bleibt möglich)
+            groupPick = new FlatButton("", "\uE70D", BtnKind.Secondary);
+            groupPick.AccessibleName = "Vorhandene Gruppe auswählen";
+            groupPick.Click += delegate { PickGroup(); };
             Label lA = FieldLabel("Ordner A (Quelle)", folderA);
             Label lB = FieldLabel("Ordner B (Ziel bzw. Gegenst\u00fcck)", folderB);
             nameA = new InputBox(false, false);
@@ -165,7 +169,7 @@ namespace SyncPilot
             btnSwap.FitWidth();
             btnSwap.Click += delegate { SwapForm(); };
             cFolders.Controls.Add(btnSwap);
-            cFolders.Controls.AddRange(new Control[] { lName, name, lGroup, groupBox, lA, devA, folderA, browseA, credA, lB, devB, folderB, browseB, credB, pathHint,
+            cFolders.Controls.AddRange(new Control[] { lName, name, lGroup, groupBox, groupPick, lA, devA, folderA, browseA, credA, lB, devB, folderB, browseB, credB, pathHint,
                 lNA, nameA, lNB, nameB, lNamesHint });
             cFolders.Height = Theme.P(340);
             cFolders.Resize += delegate
@@ -175,7 +179,9 @@ namespace SyncPilot
                 lName.Location = new Point(p, y);
                 name.SetBounds(p, y + Theme.P(22), nw, name.Height);
                 lGroup.Location = new Point(p + nw + Theme.P(16), y);
-                groupBox.SetBounds(p + nw + Theme.P(16), y + Theme.P(22), gw, groupBox.Height);
+                int pw = groupBox.Height;
+                groupBox.SetBounds(p + nw + Theme.P(16), y + Theme.P(22), gw - pw - Theme.P(6), groupBox.Height);
+                groupPick.SetBounds(groupBox.Right + Theme.P(6), groupBox.Top, pw, groupBox.Height);
                 y += Theme.P(74);
                 RowLayout(lA, devA, folderA, browseA, credA, p, w, y, g);
                 y += Theme.P(74);
@@ -1017,6 +1023,29 @@ namespace SyncPilot
         }
 
         // Laufwerksnamen der gerade angeschlossenen Laufwerke zur Auswahl
+        /// <summary>Menü mit allen vorhandenen Gruppen; die aktuelle ist markiert, „Keine Gruppe“ leert das Feld.</summary>
+        void PickGroup()
+        {
+            ModernMenuBuilder mb = new ModernMenuBuilder(this);
+            ContextMenuStrip m = mb.CreateMenu();
+            string cur = groupBox.Text.Trim();
+            List<string> all = Main.Jobs.Where(x => !string.IsNullOrWhiteSpace(x.Group)).Select(x => x.Group.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x, StringComparer.CurrentCultureIgnoreCase).ToList();
+            foreach (string grp in all)
+            {
+                string gname = grp;
+                bool on = string.Equals(gname, cur, StringComparison.OrdinalIgnoreCase);
+                m.Items.Add(mb.Item(gname, on ? '\uE73E' : MenuHelper.Folder, delegate { groupBox.Text = gname; groupBox.Box.Focus(); }));
+            }
+            if (all.Count == 0) m.Items.Add(mb.Info("Noch keine Gruppen – einfach einen Namen eintippen"));
+            else
+            {
+                m.Items.Add(new ToolStripSeparator());
+                m.Items.Add(mb.Item("Keine Gruppe", '\uE711', delegate { groupBox.Text = ""; groupBox.Box.Focus(); }));
+            }
+            m.Show(groupPick, new Point(groupPick.Width - m.PreferredSize.Width, groupPick.Height));
+        }
+
         void PickDrive(Control anchor)
         {
             ModernMenuBuilder mb = new ModernMenuBuilder(this);

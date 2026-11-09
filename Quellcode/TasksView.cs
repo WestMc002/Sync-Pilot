@@ -159,7 +159,7 @@ namespace SyncPilot
         readonly Dictionary<string, HistoryEntry> lasts = new Dictionary<string, HistoryEntry>();
         readonly HashSet<string> selected = new HashSet<string>();
         readonly Pill pAll, pSched, pErr, pOld;
-        readonly FlatButton btnTiles, btnList, btnGroup, btnSel;
+        readonly FlatButton btnTiles, btnList, btnGroup, btnSel, btnHidden;
         readonly Label selInfo;
         readonly TaskListHeader listHead;
         string chip = "all";
@@ -254,6 +254,14 @@ namespace SyncPilot
                 AppSettings.Current.Save();
                 Rebuild();
             };
+            // Deaktivierte Aufgaben aus- und einblenden (nur sichtbar, wenn es welche gibt)
+            btnHidden = new FlatButton("", "\uE7B3", BtnKind.Secondary);
+            btnHidden.Click += delegate
+            {
+                AppSettings.Current.HideDisabled = !AppSettings.Current.HideDisabled;
+                AppSettings.Current.Save();
+                Rebuild();
+            };
             selInfo = Ui.Label("", Theme.Small, Theme.TextDim, Theme.Bg);
             btnSel = new FlatButton("Ausgewählte synchronisieren", Theme.GSync, BtnKind.Secondary);
             btnSel.Height = Theme.P(32);
@@ -263,7 +271,7 @@ namespace SyncPilot
                 List<SyncJob> sel = Main.Jobs.Where(x => selected.Contains(x.Id) && !x.Disabled).ToList();
                 if (sel.Count > 0) RunJobs(sel, sel.Count == 1 ? "Die ausgewählte Aufgabe jetzt synchronisieren?" : "Die " + sel.Count + " ausgewählten Aufgaben jetzt synchronisieren?");
             };
-            foreach (FlatButton b in new FlatButton[] { btnTiles, btnList, btnGroup })
+            foreach (FlatButton b in new FlatButton[] { btnTiles, btnList, btnGroup, btnHidden })
             {
                 b.Height = Theme.P(32);
                 if (b == btnGroup) b.FitWidth(); else b.Width = b.Height;
@@ -271,7 +279,7 @@ namespace SyncPilot
             listHead = new TaskListHeader(this);
 
             Controls.AddRange(new Control[] { title, subtitle, btnAll, btnNew, tOk, tWarn, tErr, strip,
-                pAll, pSched, pErr, pOld, btnTiles, btnList, btnGroup, selInfo, btnSel, listHead, list, empty });
+                pAll, pSched, pErr, pOld, btnTiles, btnList, btnGroup, btnHidden, selInfo, btnSel, listHead, list, empty });
 
             LoadHistory();
             Rebuild();
@@ -349,11 +357,11 @@ namespace SyncPilot
             tOk.Invalidate(); tWarn.Invalidate(); tErr.Invalidate();
             if (pAll != null)
             {
-                pAll.Count = Main.Jobs.Count;
-                pSched.Count = Main.Jobs.Count(j => Matches(j, "sched"));
-                pErr.Count = Main.Jobs.Count(j => Matches(j, "err"));
+                pAll.Count = Main.Jobs.Count(Shown);
+                pSched.Count = Main.Jobs.Count(j => Shown(j) && Matches(j, "sched"));
+                pErr.Count = Main.Jobs.Count(j => Shown(j) && Matches(j, "err"));
                 pErr.Alert = Main.Jobs.Any(j => StatusKind(LastOf(j)) == 3) ? 2 : pErr.Count > 0 ? 1 : 0;
-                pOld.Count = Main.Jobs.Count(j => Matches(j, "old"));
+                pOld.Count = Main.Jobs.Count(j => Shown(j) && Matches(j, "old"));
                 foreach (TaskGroupHeader gh in items.OfType<TaskGroupHeader>()) gh.Info = GroupInfo(gh.Group);
                 // Filter "Fehler" bzw. "länger nicht gelaufen" hängen vom Verlauf ab
                 if (chip == "err" || chip == "old") Rebuild();
@@ -387,6 +395,12 @@ namespace SyncPilot
             }
         }
 
+        /// <summary>Nicht ausgeblendet (deaktivierte Aufgaben nur, wenn „Deaktivierte einblenden“).</summary>
+        static bool Shown(SyncJob j)
+        {
+            return !(j.Disabled && AppSettings.Current.HideDisabled);
+        }
+
         bool MatchesSearch(SyncJob j)
         {
             return filter.Length == 0 ||
@@ -416,7 +430,7 @@ namespace SyncPilot
 
         string GroupInfo(string group)
         {
-            List<SyncJob> js = Main.Jobs.Where(j => GroupOf(j) == group).ToList();
+            List<SyncJob> js = Main.Jobs.Where(j => GroupOf(j) == group && Shown(j)).ToList();
             int err = js.Count(j => StatusKind(LastOf(j)) == 3), warn = js.Count(j => StatusKind(LastOf(j)) == 2),
                 never = js.Count(j => LastOf(j) == null && !j.Disabled);
             List<string> parts = new List<string>();
@@ -450,7 +464,7 @@ namespace SyncPilot
             foreach (Control c in items) { list.Controls.Remove(c); c.Dispose(); }
             items.Clear();
             anchorRow = null;
-            List<SyncJob> shown = Main.Jobs.Where(j => Matches(j, chip) && MatchesSearch(j)).ToList();
+            List<SyncJob> shown = Main.Jobs.Where(j => Shown(j) && Matches(j, chip) && MatchesSearch(j)).ToList();
             selected.IntersectWith(shown.Select(j => j.Id));
             if (grouped)
             {
@@ -502,7 +516,15 @@ namespace SyncPilot
             btnGroup.Kind = anyGroup && AppSettings.Current.TaskGrouped ? BtnKind.Soft : BtnKind.Secondary;
             BarTip.SetToolTip(btnGroup, anyGroup ? "Aufgaben nach Gruppe ordnen bzw. alle untereinander zeigen"
                 : "Noch keine Gruppen – Klick bildet Gruppen aus den Namen (z. B. „Sync PC <-> NAS (Dokumente)“)");
-            btnTiles.Invalidate(); btnList.Invalidate(); btnGroup.Invalidate();
+            int nDis = Main.Jobs.Count(j => j.Disabled);
+            bool hide = AppSettings.Current.HideDisabled;
+            btnHidden.Visible = nDis > 0;
+            btnHidden.Glyph = hide ? "\uED1A" : "\uE7B3";
+            btnHidden.Kind = hide ? BtnKind.Soft : BtnKind.Secondary;
+            btnHidden.AccessibleName = hide ? "Deaktivierte Aufgaben einblenden" : "Deaktivierte Aufgaben ausblenden";
+            BarTip.SetToolTip(btnHidden, (hide ? nDis + (nDis == 1 ? " deaktivierte Aufgabe ist" : " deaktivierte Aufgaben sind") + " ausgeblendet – Klick blendet sie ein"
+                : "Deaktivierte Aufgaben ausblenden (" + nDis + ")"));
+            btnTiles.Invalidate(); btnList.Invalidate(); btnGroup.Invalidate(); btnHidden.Invalidate();
             int n = selected.Count;
             selInfo.Text = n > 0 ? n + " ausgewählt" : "";
             selInfo.Visible = lm && n > 0;
@@ -843,6 +865,7 @@ namespace SyncPilot
             btnList.Location = new Point(rx - btnList.Width, y);
             btnTiles.Location = new Point(btnList.Left - Theme.P(4) - btnTiles.Width, y);
             rx = btnTiles.Left - Theme.P(10);
+            if (btnHidden.Visible) { btnHidden.Location = new Point(rx - btnHidden.Width, y); rx = btnHidden.Left - Theme.P(10); }
             if (btnGroup.Visible) { btnGroup.Location = new Point(rx - btnGroup.Width, y); rx = btnGroup.Left - Theme.P(10); }
             if (btnSel.Visible)
             {

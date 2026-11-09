@@ -1,4 +1,4 @@
-// Sync Pilot – Aufgaben aus Easy2Sync übernehmen (Datei easy2sync.sdb)
+﻿// Sync Pilot – Aufgaben aus Easy2Sync übernehmen (Datei easy2sync.sdb)
 // Copyright (C) 2026 Günther Schoder · https://www.westmc002.de
 // Lizenz: GNU General Public License v3.0 oder später (siehe LICENSE)
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -53,8 +53,14 @@ namespace SyncPilot
             return true;
         }
 
+        /// <summary>Nach Read: Aufgaben, die nicht übernommen werden konnten („Name – Grund“).</summary>
+        public static readonly List<string> LastSkipped = new List<string>();
+
+        sealed class SkipException : Exception { public SkipException(string m) : base(m) { } }
+
         public static List<ImportedJob> Read(string file)
         {
+            LastSkipped.Clear();
             byte[] d;
             using (FileStream fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
             {
@@ -78,7 +84,13 @@ namespace SyncPilot
                     ImportedJob ij = ReadRecord(rd, recs[i][0], end);
                     if (ij != null) list.Add(ij);
                 }
-                catch { /* unbekannter Aufbau: Aufgabe auslassen */ }
+                catch (Exception ex)
+                {
+                    // unbekannter Aufbau: Aufgabe auslassen, aber melden
+                    int q;
+                    string nm = rd.Str(recs[i][0] + 4, out q) ?? "?";
+                    LastSkipped.Add(nm.Trim() + " – " + (ex is SkipException ? ex.Message : "Aufbau nicht erkannt"));
+                }
             }
             return list;
         }
@@ -95,13 +107,68 @@ namespace SyncPilot
                 string name = rd.Str(o + 4, out p);
                 if (string.IsNullOrEmpty(name) || name.Length < 2 || name.Length > 300 || IsPath(name)) continue;
                 string a = rd.Str(p, out p);
-                if (!IsPath(a)) continue;
+                if (!IsSidePath(a)) continue;
                 string b = rd.Str(p, out p);
-                if (!IsPath(b)) continue;
+                if (!IsSidePath(b)) continue;
+                if (a.StartsWith("/") && b.StartsWith("/")) continue;
                 res.Add(new int[] { o });
                 o = p - 1;
             }
             return res;
+        }
+
+        /// <summary>Wie IsPath, dazu der Pfad auf einem FTP-Server („/home/…“); die volle Adresse steht weiter hinten.</summary>
+        static bool IsSidePath(string s)
+        {
+            return IsPath(s) || (s != null && s.Length > 1 && s[0] == '/');
+        }
+
+        /// <summary>
+        /// FTP-Seite: Easy2Sync speichert vorne nur den Pfad („/home/…“) und weiter hinten die Adresse
+        /// („ftpold://server/home/…“). Die passende Adresse im Bereich der Aufgabe suchen.
+        /// </summary>
+        static string FindRemote(Reader rd, string path, int from, int end)
+        {
+            // Easy2Sync schreibt den Pfad mal mit "/" oder "\" am Ende, die Adresse mal ohne
+            string want = path.TrimEnd('/', '\\');
+            for (int o = from; o + 10 < end; o++)
+            {
+                int n = rd.U32(o);
+                if (n < 8 || n > 1000) continue;
+                int q;
+                string s = rd.Str(o, out q);
+                if (s == null) continue;
+                int i = s.IndexOf("://", StringComparison.Ordinal);
+                if (i <= 0) continue;
+                int slash = s.IndexOf('/', i + 3);
+                if (slash < 0) continue;
+                if (string.Equals(s.Substring(slash).TrimEnd('/', '\\'), want, StringComparison.Ordinal)) return s;
+            }
+            return null;
+        }
+
+        /// <summary>Easy2Sync-Adresse in eine Sync-Pilot-Adresse umsetzen (ftpold = klassisches FTP).</summary>
+        static string ToSyncPilotUrl(string url, ImportedJob ij)
+        {
+            int i = url.IndexOf("://", StringComparison.Ordinal);
+            string scheme = url.Substring(0, i).ToLowerInvariant(), rest = url.Substring(i + 3).TrimEnd('/', '\\');
+            string mapped;
+            switch (scheme)
+            {
+                case "ftp":
+                case "ftpold": mapped = "ftp"; break;
+                case "ftps":
+                case "ftpes": mapped = "ftps"; break;
+                case "sftp": mapped = "sftp"; break;
+                default: throw new SkipException("Verbindungsart „" + scheme + "://“ wird nicht unterstützt");
+            }
+            if (scheme == "ftpold")
+                ij.Notes.Add("Anmeldung für den FTP-Server bitte unter „Anmeldung“ eintragen (in Easy2Sync verschlüsselt). " +
+                    "Nutzt der Server SFTP, die Adresse auf sftp:// ändern.");
+            // Easy2Sync meint den Pfad ab der Wurzel des Servers ("/home/…"); in Sync Pilot heißt das "//home/…"
+            int slash = rest.IndexOf('/');
+            if (slash >= 0 && !rest.Substring(slash).StartsWith("//")) rest = rest.Substring(0, slash) + "/" + rest.Substring(slash);
+            return mapped + "://" + rest;
         }
 
         static bool IsPath(string s)
@@ -116,6 +183,10 @@ namespace SyncPilot
             string name = rd.Str(start + 4, out p);
             string a = rd.Str(p, out p);
             string b = rd.Str(p, out p);
+            // FTP-Seiten: volle Adresse aus dem Bereich der Aufgabe (sonst Aufgabe mit Grund auslassen)
+            string rawA = a, rawB = b;
+            if (a.StartsWith("/")) { rawA = FindRemote(rd, a, p, end); if (rawA == null) throw new SkipException("FTP-Adresse für " + a + " nicht gefunden"); }
+            if (b.StartsWith("/")) { rawB = FindRemote(rd, b, p, end); if (rawB == null) throw new SkipException("FTP-Adresse für " + b + " nicht gefunden"); }
             int[] flags = new int[7];
             for (int k = 0; k < 7; k++) { flags[k] = rd.U32(p); p += 4; }
             // vier Filterlisten: Dateien ignorieren, Ordner ignorieren, nur diese Dateien, nur diese Ordner –
@@ -148,8 +219,8 @@ namespace SyncPilot
             SyncJob j = new SyncJob();
             ImportedJob ij = new ImportedJob { Job = j };
             j.Name = name.Trim();
-            j.FolderA = TrimSlash(a);
-            j.FolderB = TrimSlash(b);
+            j.FolderA = rawA.Contains("://") ? ToSyncPilotUrl(rawA, ij) : TrimSlash(a);
+            j.FolderB = rawB.Contains("://") ? ToSyncPilotUrl(rawB, ij) : TrimSlash(b);
             j.Mode = replication ? SyncMode.Spiegeln : SyncMode.Abgleichen;
             j.PropagateDeletes = true;
             j.UseRecycleBin = true;
@@ -167,7 +238,7 @@ namespace SyncPilot
             if (replication) ij.Notes.Add("Replikation: als „Spiegeln A → B“ übernommen.");
 
             // Bezeichnungen der Seiten: nach der Liste der Dateistände folgen beide Ordner zweimal, dann die zwei Namen
-            int afterLabels = FindLabels(rd, p, end, j.FolderA, j.FolderB, ij);
+            int afterLabels = FindLabels(rd, p, end, rawA.Contains("://") ? rawA : j.FolderA, rawB.Contains("://") ? rawB : j.FolderB, ij);
             if (afterLabels > 0)
             {
                 // Anmeldung: 4 Felder (Benutzer A, Benutzer B, Kennwort A, Kennwort B), Inhalt verschlüsselt

@@ -1,4 +1,4 @@
-// Sync Pilot – Programmeinstellungen (Hintergrundbetrieb, Autostart, Handy-Zugriff)
+﻿// Sync Pilot – Programmeinstellungen (Hintergrundbetrieb, Autostart, Handy-Zugriff)
 // Copyright (C) 2026 Günther Schoder · https://www.westmc002.de
 // Lizenz: GNU General Public License v3.0 oder später (siehe LICENSE)
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -34,6 +34,8 @@ namespace SyncPilot
         public bool TaskList;
         /// <summary>Aufgaben nach Gruppe ordnen (nur wenn mindestens eine Aufgabe eine Gruppe hat).</summary>
         public bool TaskGrouped = true;
+        /// <summary>Deaktivierte Aufgaben in der Aufgabenliste ausblenden.</summary>
+        public bool HideDisabled;
         /// <summary>Zugeklappte Gruppen.</summary>
         public List<string> CollapsedGroups = new List<string>();
         /// <summary>Beim Start auf GitHub nach einer neuen Version sehen (höchstens einmal täglich).</summary>

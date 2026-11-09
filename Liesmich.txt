@@ -243,8 +243,13 @@ Aufgaben aus Easy2Sync übernehmen
   Namen wie "Sync PC <-> NAS (Dokumente)" lassen sich dabei auf Wunsch
   aufteilen: Gruppe "NAS", Name "Dokumente" (Gruppe ist das andere Gerät;
   ist das Ziel dieser PC, die Quelle).
+  FTP-Ziele aus Easy2Sync (z. B. ein Linux-Server) werden als ftp://-Adresse
+  übernommen; die Anmeldung bitte nachtragen. Aufgaben, die sich nicht lesen
+  lassen, nennt Sync Pilot vor dem Übernehmen mit Grund.
 
 Aufgabenliste: Kacheln, Liste, Gruppen, Filter
+  Gibt es deaktivierte Aufgaben, blendet das Auge-Symbol neben „Gruppiert“
+  sie aus bzw. wieder ein (wird gemerkt).
   Oben rechts zwischen Kacheln und kompakter Liste umschalten (wird
   gemerkt). Die Liste zeigt Name, Ordner (bzw. Bezeichnungen wie
   "PC ⇄ NAS"), Status und letzten Lauf; Klick auf einen Spaltenkopf sortiert.

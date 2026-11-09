@@ -1,4 +1,4 @@
-// Sync Pilot – Zeitplan über Windows-Aufgabenplanung bzw. Autostart
+﻿// Sync Pilot – Zeitplan über Windows-Aufgabenplanung bzw. Autostart
 // Copyright (C) 2026 Günther Schoder · https://www.westmc002.de
 // Lizenz: GNU General Public License v3.0 oder später (siehe LICENSE)
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -47,9 +47,12 @@ namespace SyncPilot
                     if (job.Schedule == ScheduleKind.Uhrzeiten && (job.Times == null || job.Times.Count == 0)) break;
                     string tn = TaskName(job);
                     string xml = TaskXml(job);
-                    string file = Path.Combine(Path.GetTempPath(), "SyncPilot_" + job.Id + ".xml");
+                    // nicht in %TEMP%: bei Remotedesktop zeigt das auf einen Sitzungsordner (…\Temp\2), den Windows
+                    // nach der Abmeldung löscht – dann fehlt der Ordner. Eigener Datenordner, notfalls neu angelegt.
+                    string file = Path.Combine(Store.Dir, "SyncPilot_" + job.Id + ".xml");
                     try
                     {
+                        Directory.CreateDirectory(Path.GetDirectoryName(file));
                         // schtasks erwartet die Aufgabenbeschreibung als UTF-16
                         File.WriteAllText(file, xml, Encoding.Unicode);
                         err = Schtasks("/Create /F /TN \"" + tn + "\" /XML \"" + file + "\"");
