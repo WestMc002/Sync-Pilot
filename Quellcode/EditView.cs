@@ -535,12 +535,9 @@ namespace SyncPilot
             FlatButton btnAvF = SmallBrowse("Ordner auswählen");
             btnAvF.Click += delegate
             {
-                using (FolderPicker d = new FolderPicker())
-                {
-                    d.Description = "Ordner, dessen Verfügbarkeit die Aufgabe startet";
-                    if (Directory.Exists(Paths.TryResolve(availFolder.Text.Trim()))) d.SelectedPath = Paths.TryResolve(availFolder.Text.Trim());
-                    if (d.ShowDialog(this) == DialogResult.OK) availFolder.Text = d.SelectedPath;
-                }
+                string avStart = Paths.TryResolve(availFolder.Text.Trim());
+                string avPicked = FolderPicker.Pick(this, "Ordner, dessen Verfügbarkeit die Aufgabe startet", Directory.Exists(avStart) ? avStart : null);
+                if (avPicked != null) availFolder.Text = avPicked;
             };
             FlatButton btnAvD = SmallBrowse("Laufwerk auswählen");
             btnAvD.Click += delegate { PickDrive(btnAvD); };
@@ -1251,14 +1248,9 @@ namespace SyncPilot
             List<string> picked = new List<string>();
             if (dirs)
             {
-                using (FolderPicker d = new FolderPicker())
-                {
-                    d.Description = "Ordner innerhalb von " + root + " auswählen";
-                    d.SelectedPath = root;
-                    d.ShowNewFolderButton = false;
-                    if (d.ShowDialog(this) != DialogResult.OK) return;
-                    picked.Add(d.SelectedPath);
-                }
+                string dir = FolderPicker.Pick(this, "Ordner innerhalb von " + root + " auswählen", root);
+                if (dir == null) return;
+                picked.Add(dir);
             }
             else
             {

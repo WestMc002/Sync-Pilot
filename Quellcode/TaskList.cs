@@ -1,4 +1,4 @@
-// Sync Pilot – kompakte Aufgabenliste: Spaltenkopf, Gruppenköpfe und Zeilen
+﻿// Sync Pilot – kompakte Aufgabenliste: Spaltenkopf, Gruppenköpfe und Zeilen
 // Copyright (C) 2026 Günther Schoder · https://www.westmc002.de
 // Lizenz: GNU General Public License v3.0 oder später (siehe LICENSE)
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -277,7 +277,7 @@ namespace SyncPilot
         bool hover;
         int hotAction = -1; // 0 = Analysieren, 1 = Synchronisieren
         Rectangle actAnalyze, actSync;
-        static readonly ToolTip Tip = new ToolTip();
+        static readonly ModernToolTip Tip = new ModernToolTip();
         Point downAt;
         bool down, pendingSelect;
         readonly string tipText;

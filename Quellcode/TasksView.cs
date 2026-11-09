@@ -39,7 +39,7 @@ namespace SyncPilot
         public readonly SyncJob Job;
         public HistoryEntry Last { get { return owner.LastOf(Job); } }
         readonly FlatButton btnAnalyze, btnSync;
-        static readonly ToolTip Tip = new ToolTip();
+        static readonly ModernToolTip Tip = new ModernToolTip();
         readonly TasksView owner;
 
         public TaskCard(TasksView owner, SyncJob job)
@@ -166,7 +166,7 @@ namespace SyncPilot
         TaskRow anchorRow;
         public int SortColumn;
         public bool SortDesc;
-        static readonly ToolTip BarTip = new ToolTip();
+        static readonly ModernToolTip BarTip = new ModernToolTip();
         readonly System.Windows.Forms.Timer timer;
         List<HistoryEntry> history;
         DateTime historyStamp;
@@ -946,12 +946,8 @@ namespace SyncPilot
             link.DropDownItems.Add(mb.Item("Auf dem Desktop", '\uE7F4', delegate { Shortcuts.Create(this, job, null); }));
             link.DropDownItems.Add(mb.Item("In einem anderen Ordner \u2026", MenuHelper.Folder, delegate
             {
-                using (FolderPicker d = new FolderPicker())
-                {
-                    d.Description = "Ordner f\u00fcr die Verkn\u00fcpfung zu \u201e" + job.Name + "\u201c";
-                    d.ShowNewFolderButton = true;
-                    if (d.ShowDialog(this) == DialogResult.OK) Shortcuts.Create(this, job, d.SelectedPath);
-                }
+                string dir = FolderPicker.Pick(this, "Ordner f\u00fcr die Verkn\u00fcpfung zu \u201e" + job.Name + "\u201c", null);
+                if (dir != null) Shortcuts.Create(this, job, dir);
             }));
             mb.StyleDropDown(link);
             m.Items.Add(link);

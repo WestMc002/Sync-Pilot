@@ -1,4 +1,4 @@
-// Sync Pilot – eigene Steuerelemente im Windows-11-Stil
+﻿// Sync Pilot – eigene Steuerelemente im Windows-11-Stil
 // Copyright (C) 2026 Günther Schoder · https://www.westmc002.de
 // Lizenz: GNU General Public License v3.0 oder später (siehe LICENSE)
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -587,7 +587,7 @@ namespace SyncPilot
 
         /// <summary>Optional: eigener Text für den Hinweis einer Zelle (Zeile, Spalte); null = Text der Zelle.</summary>
         public Func<int, int, string> TipText;
-        ToolTip tip;
+        ModernToolTip tip;
         System.Windows.Forms.Timer tipTimer;
         string tipKey, tipPending;
         HeaderHook headerHook;
@@ -599,7 +599,7 @@ namespace SyncPilot
             tipPending = text;
             if (tip == null)
             {
-                tip = new ToolTip();
+                tip = new ModernToolTip();
                 tipTimer = new System.Windows.Forms.Timer();
                 tipTimer.Interval = 450;
                 tipTimer.Tick += delegate
@@ -607,7 +607,7 @@ namespace SyncPilot
                     tipTimer.Stop();
                     if (tipPending == null || IsDisposed) return;
                     Point p = PointToClient(Cursor.Position);
-                    tip.Show(tipPending, this, p.X + Theme.P(12), p.Y + Theme.P(22), 15000);
+                    tip.ShowText(tipPending, this, p.X + Theme.P(12), p.Y + Theme.P(22), 15000);
                 };
             }
             tipTimer.Stop();
@@ -962,6 +962,52 @@ namespace SyncPilot
             if (!IconOnly)
                 Theme.DrawText(g, ItemText(selected), Font, new Rectangle(x, 0, Math.Max(10, chevR.Left - Theme.P(6) - x), Height), fg,
                     TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
+        }
+    }
+
+    /// <summary>
+    /// Tooltip im Programmdesign (Globale Richtlinien, „Weitere Fenster“): Kartenfarbe, 1 px Rand, Textfarbe,
+    /// Segoe UI 9 pt, Innenabstand 10 × 6, Umbruch bei 400 (je × Skalierung). Statt new ToolTip() überall verwenden.
+    /// </summary>
+    public sealed class ModernToolTip : ToolTip
+    {
+        static readonly Font TipFont = new Font("Segoe UI", 9f);
+        const TextFormatFlags Flags = TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix | TextFormatFlags.Left | TextFormatFlags.Top;
+        string shownText;
+
+        public ModernToolTip()
+        {
+            OwnerDraw = true;
+            InitialDelay = 450;
+            ReshowDelay = 100;
+            AutoPopDelay = 15000;
+            Popup += delegate (object s, PopupEventArgs e)
+            {
+                string text = shownText ?? (e.AssociatedControl != null ? GetToolTip(e.AssociatedControl) : null) ?? "";
+                Size size = TextRenderer.MeasureText(text, TipFont, new Size(Theme.P(400), 0), Flags);
+                e.ToolTipSize = new Size(size.Width + Theme.P(20), size.Height + Theme.P(12));
+            };
+            Draw += delegate (object s, DrawToolTipEventArgs e)
+            {
+                using (SolidBrush back = new SolidBrush(Theme.Surface)) e.Graphics.FillRectangle(back, e.Bounds);
+                using (Pen pen = new Pen(Theme.Border)) e.Graphics.DrawRectangle(pen, 0, 0, e.Bounds.Width - 1, e.Bounds.Height - 1);
+                Rectangle r = new Rectangle(Theme.P(10), Theme.P(6), e.Bounds.Width - Theme.P(20), e.Bounds.Height - Theme.P(12));
+                TextRenderer.DrawText(e.Graphics, e.ToolTipText, TipFont, r, Theme.Text, Flags);
+            };
+        }
+
+        /// <summary>Text frei anzeigen (z. B. abgeschnittene Zelle); die Größe richtet sich nach diesem Text.</summary>
+        public void ShowText(string text, IWin32Window window, int x, int y, int duration)
+        {
+            shownText = text;
+            Show(text, window, x, y, duration);
+        }
+
+        /// <summary>Wie SetToolTip; danach gilt wieder der Text des jeweiligen Steuerelements.</summary>
+        public new void SetToolTip(Control control, string caption)
+        {
+            shownText = null;
+            base.SetToolTip(control, caption);
         }
     }
 }

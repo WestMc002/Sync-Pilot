@@ -1,4 +1,4 @@
-// Sync Pilot – Footer und Info-Fenster (Vorlage: Monitor Dimmer)
+﻿// Sync Pilot – Footer und Info-Fenster (Vorlage: Monitor Dimmer)
 // Copyright (C) 2026 Günther Schoder · https://www.westmc002.de
 // Lizenz: GNU General Public License v3.0 oder später (siehe LICENSE)
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -342,7 +342,7 @@ namespace SyncPilot
             table.BackColor = Theme.Surface;
             table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, S(118)));
             table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            ToolTip tip = new ToolTip();
+            ModernToolTip tip = new ModernToolTip();
             string built;
             try { built = File.GetLastWriteTime(Application.ExecutablePath).ToString("dd.MM.yyyy"); }
             catch { built = "-"; }
@@ -469,7 +469,7 @@ namespace SyncPilot
             ModernButton check = new ModernButton("Jetzt prüfen", '\uE72C', false);
             ModernButton install = new ModernButton("Aktualisieren", '\uE896', true);
             ModernButton page = new ModernButton("Release-Seite", '\uE71B', false);
-            ToolTip tip = new ToolTip();
+            ModernToolTip tip = new ModernToolTip();
             tip.SetToolTip(install, "Sync Pilot beenden, auf die neue Version aktualisieren und neu starten");
             foreach (ModernButton b in new ModernButton[] { check, install, page })
             {

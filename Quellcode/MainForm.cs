@@ -704,7 +704,7 @@ namespace SyncPilot
             updateHost.SendToBack(); // zuerst andocken: oben über der Seite
         }
 
-        readonly ToolTip updateTips = new ToolTip();
+        readonly ModernToolTip updateTips = new ModernToolTip();
         Panel noticeHost;
         Label notice;
         System.Windows.Forms.Timer noticeTimer;

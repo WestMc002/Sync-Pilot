@@ -23,6 +23,17 @@ namespace SyncPilot
         /// <summary>Nur für gleiche Bedienung wie FolderBrowserDialog; der neue Dialog kann immer Ordner anlegen.</summary>
         public bool ShowNewFolderButton = true;
 
+        /// <summary>Ordner wählen (Globale Richtlinien, „Weitere Fenster“); null bei Abbruch.</summary>
+        public static string Pick(IWin32Window owner, string title, string initial)
+        {
+            using (FolderPicker p = new FolderPicker())
+            {
+                p.Description = title ?? "";
+                p.SelectedPath = initial ?? "";
+                return p.ShowDialog(owner) == DialogResult.OK ? p.SelectedPath : null;
+            }
+        }
+
         public DialogResult ShowDialog(IWin32Window owner)
         {
             try { return ShowModern(owner); }
