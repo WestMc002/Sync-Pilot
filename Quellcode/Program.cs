@@ -22,8 +22,9 @@ namespace SyncPilot
     {
         // Aufruf:
         //   "Sync Pilot.exe"                  Oberflaeche
-        //   "Sync Pilot.exe" /run <ID|Name>   Aufgabe ohne Fenster ausfuehren (Zeitplan)
+        //   "Sync Pilot.exe" /run <ID|Name|Gruppe\Name>   Aufgabe ohne Fenster ausfuehren (Zeitplan)
         //   "Sync Pilot.exe" /runall          alle Aufgaben ohne Fenster ausfuehren
+        //   Rueckgabewert: 0 OK, 1 Fehler/Abbruch, 2 nicht gefunden, 3 Aufgaben nicht lesbar, 4 deaktiviert, 5 offline ausgelassen
         //   "Sync Pilot.exe" --nach-update    vom Update-Hilfsskript nach dem Ersetzen der EXE
         //   "Sync Pilot.exe" /sync <ID|Name>  Oberflaeche oeffnen, Aufgabe analysieren und synchronisieren (Verknuepfung)
         //   "Sync Pilot.exe" --screenshots [Zielordner]   Screenshots fuer GitHub aus Beispieldaten
@@ -123,23 +124,40 @@ namespace SyncPilot
             List<SyncJob> jobs;
             try { jobs = Store.LoadJobs(); }
             catch { return 3; }
-            int errors = 0, found = 0;
+            // Rückgabewert: 0 = OK, 1 = Fehler/Abbruch, 2 = nicht gefunden, 3 = Aufgaben nicht lesbar,
+            // 4 = Aufgabe deaktiviert (nicht gelaufen), 5 = Ziel offline, ohne Fehler ausgelassen
+            bool all = which == "*";
+            int errors = 0, found = 0, ran = 0, disabled = 0, offline = 0;
             foreach (SyncJob j in jobs)
             {
-                bool match = which == "*" || j.Id == which ||
-                             string.Equals(j.Name, which, StringComparison.OrdinalIgnoreCase);
-                if (!match) continue;
+                if (!all && !Matches(j, which)) continue;
                 found++;
-                if (j.Disabled) continue; // deaktivierte Aufgaben laufen nicht nach Zeitplan
+                if (j.Disabled) { disabled++; continue; } // deaktivierte Aufgaben laufen nicht nach Zeitplan
                 // Laufwerk, Freigabe oder Server fehlt: ohne Fehlermeldung auslassen (wenn so eingestellt)
-                if (j.SkipOffline && Reach.Offline(j) != null) continue;
+                if (j.SkipOffline && Reach.Offline(j) != null) { offline++; continue; }
+                ran++;
                 HistoryEntry h;
                 try { h = Runner.Run(j, true, delegate { return false; }, delegate (string s) { }); }
                 catch (Exception ex) { h = Runner.Crash(j, true, ex); }
                 if (!h.IsOk) errors++;
             }
             if (found == 0) return 2;
-            return errors > 0 ? 1 : 0;
+            if (errors > 0) return 1;
+            if (offline > 0) return 5;                  // auch bei /runall: mindestens eine Aufgabe fehlte
+            if (ran == 0 && disabled > 0 && !all) return 4; // bei /runall sind deaktivierte Aufgaben normal
+            return 0;
+        }
+
+        /// <summary>/run-Ziel: ID, Name oder "Gruppe\Name" (auch "Gruppe/Name"); Groß-/Kleinschreibung egal.</summary>
+        static bool Matches(SyncJob j, string which)
+        {
+            string w = which.Trim();
+            if (string.Equals(j.Id, w, StringComparison.OrdinalIgnoreCase)) return true;
+            if (string.Equals(j.Name.Trim(), w, StringComparison.OrdinalIgnoreCase)) return true;
+            int cut = w.LastIndexOfAny(new[] { '\\', '/' });
+            if (cut <= 0 || cut >= w.Length - 1) return false;
+            return string.Equals((j.Group ?? "").Trim(), w.Substring(0, cut).Trim(), StringComparison.OrdinalIgnoreCase) &&
+                   string.Equals(j.Name.Trim(), w.Substring(cut + 1).Trim(), StringComparison.OrdinalIgnoreCase);
         }
     }
 }

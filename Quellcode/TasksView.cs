@@ -974,6 +974,10 @@ namespace SyncPilot
             }));
             mb.StyleDropDown(link);
             m.Items.Add(link);
+            m.Items.Add(mb.Item("Befehlszeile kopieren", '\uE756', delegate
+            {
+                try { Clipboard.SetText(Scheduler.Command(job)); } catch { }
+            }));
             m.Items.Add(new ToolStripSeparator());
             m.Items.Add(mb.Item(job.SideTitle(true) + " \u00f6ffnen", MenuHelper.Folder, delegate { Ui.Explore(Paths.TryResolve(job.FolderA), false); }));
             m.Items.Add(mb.Item(job.SideTitle(false) + " \u00f6ffnen", MenuHelper.Folder, delegate { Ui.Explore(Paths.TryResolve(job.FolderB), false); }));

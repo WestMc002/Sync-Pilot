@@ -466,7 +466,8 @@ Hintergrund und Handy-Zugriff (Seite "Einstellungen")
   Administratorrechten). Tipp: "Zum Startbildschirm hinzufügen".
 
 Kommandozeile
-  "Sync Pilot.exe" /run <Name oder ID>
+  "Sync Pilot.exe" /run <Name oder ID>          z. B. /run "Replikation 2"
+  "Sync Pilot.exe" /run "<Gruppe>\<Name>"       bei gleichem Namen in mehreren Gruppen
   "Sync Pilot.exe" /runall
   "Sync Pilot.exe" /sync <Name oder ID>         öffnen, analysieren, synchronisieren
   "Sync Pilot.exe" /tray                        unsichtbar im Infobereich starten
@@ -475,7 +476,21 @@ Kommandozeile
   "Sync Pilot.exe" /ordner-x                    gemerkten Ordner A vergessen
   "Sync Pilot.exe" --screenshots [Zielordner]   Screenshots aus Beispieldaten
                                                 (Standard: Ordner Screenshots)
-  Rückgabewert: 0 = OK, 1 = Fehler oder Abbruch, 2 = Aufgabe nicht gefunden
+  Die ID ist eindeutig und bleibt beim Umbenennen gleich: Rechtsklick auf die
+  Aufgabe > "Befehlszeile kopieren", oder beim Bearbeiten unter "Für Profis"
+  > "Aufruf über die Kommandozeile". Mit dem Namen laufen alle Aufgaben
+  dieses Namens (verschiedene Gruppen); Groß-/Kleinschreibung ist egal.
+  /run und /runall warten, bis der Abgleich samt Skripten fertig ist.
+  Rückgabewert: 0 = OK
+                1 = Fehler oder Abbruch (auch: Skript meldet Rückgabewert <> 0)
+                2 = Aufgabe nicht gefunden
+                3 = Aufgabenliste nicht lesbar
+                4 = Aufgabe deaktiviert, nicht gelaufen (nur /run)
+                5 = Ziel nicht erreichbar, ohne Fehler ausgelassen
+                    ("Ohne Verbindung still auslassen"; bei /runall: mindestens eine)
+  In einer .bat wartet die Eingabeaufforderung von selbst (%ERRORLEVEL%);
+  von Hand: start "" /wait "Sync Pilot.exe" /run "Name"
+  PowerShell: (Start-Process "Sync Pilot.exe" '/run "Name"' -Wait -PassThru).ExitCode
 
 Daten
   %LOCALAPPDATA%\Sync Pilot

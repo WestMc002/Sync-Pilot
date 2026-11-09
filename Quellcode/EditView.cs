@@ -692,13 +692,33 @@ namespace SyncPilot
                 "Befehle, die Administratorrechte brauchen (net stop), funktionieren nur, wenn Sync Pilot als Administrator läuft.",
                 Theme.Small, Theme.TextDim, Theme.Surface);
 
+            // Aufruf über die Kommandozeile (z. B. aus einem eigenen Skript): mit ID, eindeutig und unabhängig vom Namen
+            Label hCmd = Ui.Label("Aufruf über die Kommandozeile", Theme.Bold, Theme.Text, Theme.Surface);
+            Label lCmdHint = Ui.WrapLabel(original != null
+                ? "Startet die Aufgabe ohne Fenster und wartet, bis sie fertig ist. Die ID (" + original.Id + ") bleibt auch beim Umbenennen gleich; " +
+                  "statt der ID gehen auch der Name oder „Gruppe\\Name“. Rückgabewert 0 = OK, 1 = Fehler, 4 = deaktiviert, 5 = offline ausgelassen."
+                : "Die ID wird beim Speichern vergeben. Danach steht hier der Aufruf zum Kopieren.",
+                Theme.Small, Theme.TextDim, Theme.Surface);
+            InputBox cmdBox = new InputBox(true, false);
+            cmdBox.Box.ReadOnly = true;
+            cmdBox.Box.BackColor = Theme.Input;
+            cmdBox.Text = original != null ? Scheduler.Command(original) : "";
+            cmdBox.Box.AccessibleName = "Aufruf über die Kommandozeile";
+            FlatButton btnCmd = new FlatButton("", "\uE8C8", BtnKind.Secondary);
+            btnCmd.Width = Theme.P(36);
+            btnCmd.AccessibleName = "Aufruf kopieren";
+            btnCmd.Enabled = original != null;
+            btnCmd.Click += delegate { try { Clipboard.SetText(cmdBox.Text); } catch { } };
+            ModernToolTip cmdTip = new ModernToolTip();
+            cmdTip.SetToolTip(btnCmd, "Aufruf in die Zwischenablage kopieren");
+
             nameA.Box.TextChanged += delegate { UpdateSideLabels(); };
             nameB.Box.TextChanged += delegate { UpdateSideLabels(); };
             UpdateSideLabels();
 
             cPro.Controls.AddRange(new Control[] { hConf, lConfHint, cbConflict, hNoDel, tNoDelA, lNoDelA, tNoDelB, lNoDelB,
                 hLock, lLockHint, lockFile, btnLock, hScript, lScriptHint, lBefore, scriptBefore, btnBefore, lAfter, scriptAfter, btnAfter,
-                tScriptsChanged, lScriptsChanged, tScriptAbort, lScriptAbort, lAfterHint });
+                tScriptsChanged, lScriptsChanged, tScriptAbort, lScriptAbort, lAfterHint, hCmd, cmdBox, btnCmd, lCmdHint });
             cPro.Height = Theme.P(800);
             cPro.Resize += delegate
             {
@@ -755,7 +775,15 @@ namespace SyncPilot
                     lab.SetBounds(p, y + Theme.P(8), Math.Max(10, tg.Left - p - g), Theme.P(22));
                     y += Theme.P(36);
                 }
-                y = wrap(lAfterHint, y + Theme.P(4)) + Theme.P(20);
+                y = wrap(lAfterHint, y + Theme.P(4)) + Theme.P(16);
+
+                hCmd.Location = new Point(p, y);
+                y += Theme.P(28);
+                btnCmd.Height = cmdBox.Height;
+                btnCmd.Location = new Point(p + w - btnCmd.Width, y);
+                cmdBox.SetBounds(p, y, btnCmd.Left - g - p, cmdBox.Height);
+                y += cmdBox.Height + Theme.P(6);
+                y = wrap(lCmdHint, y) + Theme.P(20);
                 if (cPro.Height != y) { cPro.Height = y; LayoutSections(); }
             };
 

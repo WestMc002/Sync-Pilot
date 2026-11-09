@@ -26,7 +26,8 @@ namespace SyncPilot
             return "Sync Pilot\\" + name + " (" + job.Id.Substring(0, 6) + ")";
         }
 
-        static string Command(SyncJob job)
+        /// <summary>Aufruf ohne Fenster über die ID (eindeutig, übersteht Umbenennen).</summary>
+        public static string Command(SyncJob job)
         {
             return "\"" + Application.ExecutablePath + "\" /run " + job.Id;
         }
