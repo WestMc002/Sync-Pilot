@@ -105,6 +105,12 @@ namespace SyncPilot
             get { lock (Lock) return Active.Values.Any(w => w.Running); }
         }
 
+        /// <summary>Namen der Aufgaben, deren automatisch gestarteter Abgleich gerade läuft.</summary>
+        public static string[] BusyNames
+        {
+            get { lock (Lock) return Active.Values.Where(w => w.Running).Select(w => w.Job.Name).ToArray(); }
+        }
+
         static string Signature(SyncJob j)
         {
             return string.Join("|", new string[] { j.FolderA, j.FolderB, j.WatchA.ToString(), j.WatchB.ToString(),

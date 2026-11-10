@@ -237,7 +237,7 @@
     var main = el('button', 'jmain');
     main.type = 'button';
     var running = j.busy || j.running;
-    main.appendChild(el('span', 'dot ' + (running ? 'live' : j.disabled ? 'none' : j.kind)));
+    main.appendChild(el('span', 'dot ' + (running ? 'busy' : j.disabled ? 'none' : j.kind)));
     var txt = el('span', 'jtext');
     txt.appendChild(el('span', 'name', j.name));
     var sides = j.named ? j.nameA + (j.mode === 'Abgleichen' ? ' ⇄ ' : ' → ') + j.nameB

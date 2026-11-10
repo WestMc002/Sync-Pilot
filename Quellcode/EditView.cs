@@ -42,7 +42,7 @@ namespace SyncPilot
         readonly ListBox lbTimes;
         readonly FlatButton btnTimeAdd, btnTimeEdit, btnTimeDel;
         readonly List<TimeSlot> times;
-        readonly ToggleSwitch tCatchUp, tOffline;
+        readonly ToggleSwitch tCatchUp, tOffline, tAdmin;
         readonly Label lCatchUp, lCatchUpDesc, lOffline, lOfflineDesc;
         static readonly ScheduleKind[] SchedKinds = { ScheduleKind.Manuell, ScheduleKind.Uhrzeiten, ScheduleKind.Intervall, ScheduleKind.BeiAnmeldung };
         static readonly int[] Intervals = { 5, 10, 15, 30, 60, 120, 180, 240, 360, 480, 720 };
@@ -680,6 +680,11 @@ namespace SyncPilot
             btnAfter.Click += delegate { PickFile(scriptAfter, "Skript nach dem Kopieren", null, true); };
             tScriptsChanged = new ToggleSwitch();
             tScriptAbort = new ToggleSwitch();
+            tAdmin = new ToggleSwitch();
+            tAdmin.Checked = j.RunAsAdmin;
+            Label lAdmin = Ui.Label("Mit Administratorrechten ausf\u00fchren", Theme.Body, Theme.Text, Theme.Surface);
+            tAdmin.AccessibleName = lAdmin.Text;
+            lAdmin.Click += delegate { tAdmin.Checked = !tAdmin.Checked; };
             tScriptsChanged.Checked = j.ScriptsOnlyWithChanges;
             tScriptAbort.Checked = j.ScriptAbortOnError;
             Label lScriptsChanged = Ui.Label("Nur, wenn es etwas zu tun gibt", Theme.Body, Theme.Text, Theme.Surface);
@@ -689,7 +694,9 @@ namespace SyncPilot
             lScriptsChanged.Click += delegate { tScriptsChanged.Checked = !tScriptsChanged.Checked; };
             lScriptAbort.Click += delegate { tScriptAbort.Checked = !tScriptAbort.Checked; };
             Label lAfterHint = Ui.WrapLabel("„Nachher“ läuft auch nach Fehlern oder einem Abbruch – z. B. um einen vorher beendeten Dienst wieder zu starten. " +
-                "Befehle, die Administratorrechte brauchen (net stop), funktionieren nur, wenn Sync Pilot als Administrator läuft.",
+                "Befehle, die Administratorrechte brauchen (net stop), funktionieren nur mit „Mit Administratorrechten ausführen“: " +
+                "Der Zeitplan läuft dann ohne Nachfrage mit höchsten Rechten (Windows fragt einmal beim Speichern), " +
+                "manuell startet Sync Pilot als Administrator neu. Als Administrator sind verbundene Netzlaufwerke (z. B. Z:) oft nicht sichtbar – dann \\\\Server\\Freigabe verwenden.",
                 Theme.Small, Theme.TextDim, Theme.Surface);
 
             // Aufruf über die Kommandozeile (z. B. aus einem eigenen Skript): mit ID, eindeutig und unabhängig vom Namen
@@ -718,7 +725,7 @@ namespace SyncPilot
 
             cPro.Controls.AddRange(new Control[] { hConf, lConfHint, cbConflict, hNoDel, tNoDelA, lNoDelA, tNoDelB, lNoDelB,
                 hLock, lLockHint, lockFile, btnLock, hScript, lScriptHint, lBefore, scriptBefore, btnBefore, lAfter, scriptAfter, btnAfter,
-                tScriptsChanged, lScriptsChanged, tScriptAbort, lScriptAbort, lAfterHint, hCmd, cmdBox, btnCmd, lCmdHint });
+                tScriptsChanged, lScriptsChanged, tScriptAbort, lScriptAbort, tAdmin, lAdmin, lAfterHint, hCmd, cmdBox, btnCmd, lCmdHint });
             cPro.Height = Theme.P(800);
             cPro.Resize += delegate
             {
@@ -766,7 +773,7 @@ namespace SyncPilot
                     y += box.Height + Theme.P(8);
                 }
                 y = wrap(lScriptHint, y) + Theme.P(8);
-                foreach (object[] row in new object[][] { new object[] { lScriptsChanged, tScriptsChanged }, new object[] { lScriptAbort, tScriptAbort } })
+                foreach (object[] row in new object[][] { new object[] { lScriptsChanged, tScriptsChanged }, new object[] { lScriptAbort, tScriptAbort }, new object[] { lAdmin, tAdmin } })
                 {
                     ToggleSwitch tg = (ToggleSwitch)row[1];
                     tg.Location = new Point(p + w - tg.Width, y + (Theme.P(36) - tg.Height) / 2);
@@ -1515,6 +1522,7 @@ namespace SyncPilot
             j.ScriptAfter = scriptAfter.Text.Trim().Length > 0 ? scriptAfter.Text.Trim() : null;
             j.ScriptsOnlyWithChanges = tScriptsChanged.Checked;
             j.ScriptAbortOnError = tScriptAbort.Checked;
+            j.RunAsAdmin = tAdmin.Checked;
             j.Excludes = new List<string>();
             j.ExcludeFiles = Lines(exFiles);
             j.ExcludeDirs = Lines(exDirs);

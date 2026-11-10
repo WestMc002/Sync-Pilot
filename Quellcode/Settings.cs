@@ -36,6 +36,8 @@ namespace SyncPilot
         public bool TaskGrouped = true;
         /// <summary>Deaktivierte Aufgaben in der Aufgabenliste ausblenden.</summary>
         public bool HideDisabled;
+        /// <summary>Sync Pilot immer mit Administratorrechten starten (Windows fragt bei jedem Start nach).</summary>
+        public bool AlwaysAdmin;
         /// <summary>Zugeklappte Gruppen.</summary>
         public List<string> CollapsedGroups = new List<string>();
         /// <summary>Beim Start auf GitHub nach einer neuen Version sehen (höchstens einmal täglich).</summary>

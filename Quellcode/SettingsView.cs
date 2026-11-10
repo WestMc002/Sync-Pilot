@@ -28,7 +28,7 @@ namespace SyncPilot
         readonly ChoiceBox cbLogDays, cbAfterAll;
         static readonly string[] AfterAllKeys = { "Nichts", "Herunterfahren", "Ruhezustand", "Energiesparen" };
         static readonly int[] LogDayChoices = { 7, 14, 30, 90, 180, 365, 0 };
-        readonly ToggleSwitch tBackground, tAutostart, tAskBg, tExplorer, tWeb, tHttps, tInternet;
+        readonly ToggleSwitch tBackground, tAutostart, tAskBg, tAdmin, tExplorer, tWeb, tHttps, tInternet;
 
         // Steuerung per Handy
         readonly InputBox port, address;
@@ -85,10 +85,14 @@ namespace SyncPilot
             // Rückfrage beim Speichern von Aufgaben mit Ereignissen (dort per „Nicht mehr fragen“ abschaltbar)
             tAskBg = Row(cBack, 2, "Bei Aufgaben mit Ereignissen nachfragen",
                 "Fragt beim Speichern, ob Sync Pilot im Hintergrund und mit Windows laufen soll, solange das noch aus ist.");
+            tAdmin = Row(cBack, 3, "Immer als Administrator starten",
+                (Elevation.IsAdmin ? "Läuft gerade als Administrator. " : "Läuft gerade ohne. ") +
+                "Windows fragt bei jedem Start nach; Ereignisse und Handy-Aufträge laufen dann ebenso.");
             tBackground.Checked = s.Background;
             tAutostart.Checked = s.Autostart;
             tAskBg.Checked = !s.NoAskBackground;
-            cBack.Height = Theme.P(56 + 3 * 64 + 12);
+            tAdmin.Checked = s.AlwaysAdmin;
+            cBack.Height = Theme.P(56 + 4 * 64 + 12);
 
             // ---------- Explorer ----------
             cExplorer = Section("Explorer");
@@ -263,6 +267,7 @@ namespace SyncPilot
             tBackground.CheckedChanged += delegate { MarkDirty(); };
             tAutostart.CheckedChanged += delegate { MarkDirty(); };
             tAskBg.CheckedChanged += delegate { MarkDirty(); };
+            tAdmin.CheckedChanged += delegate { MarkDirty(); };
             tExplorer.CheckedChanged += delegate { MarkDirty(); };
             foreach (InputBox b in new InputBox[] { certFile, keyFile, certPass, certName })
                 b.Box.TextChanged += delegate { MarkDirty(); };
@@ -672,6 +677,16 @@ namespace SyncPilot
         }
 
         // "Abbrechen": Seite aus den gespeicherten Einstellungen neu aufbauen (Änderungen verwerfen)
+        /// <summary>Nach dem Speichern wieder an dieselbe Stelle blättern.</summary>
+        public void ScrollTo(int y)
+        {
+            if (y <= 0) return;
+            BeginInvoke(new Action(delegate
+            {
+                try { scroll.AutoScrollPosition = new Point(0, y); } catch { }
+            }));
+        }
+
         void Discard()
         {
             BeginInvoke(new Action(delegate { Main.Navigate(new SettingsView(Main)); }));
@@ -784,6 +799,8 @@ namespace SyncPilot
             s.Background = tBackground.Checked;
             s.Autostart = tAutostart.Checked;
             s.NoAskBackground = !tAskBg.Checked;
+            bool adminNow = tAdmin.Checked && !s.AlwaysAdmin && !Elevation.IsAdmin;
+            s.AlwaysAdmin = tAdmin.Checked;
             s.ExplorerEntry = tExplorer.Checked;
             s.LogDays = logDays;
             s.AfterAll = AfterAllKeys[Math.Max(0, Math.Min(AfterAllKeys.Length - 1, cbAfterAll.SelectedIndex))];
@@ -823,12 +840,27 @@ namespace SyncPilot
             loading = true;
             address.Text = s.WebHost ?? "";
             loading = false;
-            // zurück zur Startansicht mit kurzer Meldung im Hauptfenster
-            string done = s.WebEnabled && WebServer.Running ? "Einstellungen gespeichert · Steuerung per Handy: " + WebServer.PhoneUrl() + "/"
-                        : s.WebEnabled ? "Einstellungen gespeichert · Steuerung per Handy: nicht gestartet – " + (WebServer.LastError ?? "unbekannter Fehler")
-                        : "Einstellungen gespeichert";
+            // kurze Meldung oben im Hauptfenster
+            string done = s.WebEnabled && WebServer.Running ? "Gespeichert · Steuerung per Handy: " + WebServer.PhoneUrl() + "/"
+                        : s.WebEnabled ? "Gespeichert · Steuerung per Handy: nicht gestartet – " + (WebServer.LastError ?? "unbekannter Fehler")
+                        : "Gespeichert";
             MainForm main = Main;
-            BeginInvoke(new Action(delegate { main.ShowTasks(); main.ShowNotice(done, !s.WebEnabled || WebServer.Running); }));
+            if (adminNow && MessageBox.Show("Sync Pilot jetzt als Administrator neu starten?", "Sync Pilot",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+            {
+                BeginInvoke(new Action(delegate { main.RestartAsAdmin(null); }));
+                return;
+            }
+            // Speichern schließt die Seite nicht: frisch mit den gespeicherten Werten anzeigen (gleiche Bildlaufposition),
+            // oben die kurze grüne Meldung
+            int keepScroll = scroll.VerticalScroll.Value;
+            BeginInvoke(new Action(delegate
+            {
+                SettingsView fresh = new SettingsView(main);
+                main.Navigate(fresh);
+                fresh.ScrollTo(keepScroll);
+                main.ShowNotice(done, !s.WebEnabled || WebServer.Running);
+            }));
         }
 
         // =============== HTTPS ===============

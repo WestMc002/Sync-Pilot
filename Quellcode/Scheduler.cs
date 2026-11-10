@@ -35,12 +35,21 @@ namespace SyncPilot
         // Liefert null bei Erfolg, sonst eine Fehlermeldung.
         public static string Apply(SyncJob job)
         {
-            Remove(job);
+            // Zeitplan mit Administratorrechten ohne eigene Rechte: Löschen und Anlegen gemeinsam in einem
+            // Aufruf als Administrator (nur eine Abfrage von Windows statt zwei)
+            bool asAdmin = job.RunAsAdmin && !Elevation.IsAdmin && !job.Disabled &&
+                           ((job.Schedule == ScheduleKind.Uhrzeiten && job.Times != null && job.Times.Count > 0) ||
+                            job.Schedule == ScheduleKind.Intervall || job.Schedule == ScheduleKind.BeiAnmeldung);
+            string oldTask = job.ScheduledTask;
+            if (asAdmin) { job.ScheduledTask = null; Remove(job); }
+            else Remove(job);
             if (job.Disabled) return null; // deaktiviert: kein Zeitplan
             job.Upgrade(); // ältere Zeitpläne (Täglich, Stündlich) umstellen
             job.NeedsReapply = false;
             string err = null;
-            switch (job.Schedule)
+            // Mit Administratorrechten "bei Anmeldung": über die Aufgabenplanung (Autostart kann keine Rechte erhöhen)
+            bool logonTask = job.Schedule == ScheduleKind.BeiAnmeldung && job.RunAsAdmin;
+            switch (logonTask ? ScheduleKind.Intervall : job.Schedule)
             {
                 case ScheduleKind.Uhrzeiten:
                 case ScheduleKind.Intervall:
@@ -56,7 +65,23 @@ namespace SyncPilot
                         Directory.CreateDirectory(Path.GetDirectoryName(file));
                         // schtasks erwartet die Aufgabenbeschreibung als UTF-16
                         File.WriteAllText(file, xml, Encoding.Unicode);
-                        err = Schtasks("/Create /F /TN \"" + tn + "\" /XML \"" + file + "\"");
+                        string args = "/Create /F /TN \"" + tn + "\" /XML \"" + file + "\"";
+                        // höchste Rechte bzw. eine vorher mit Administratorrechten angelegte Aufgabe: nur als Administrator
+                        if (asAdmin)
+                        {
+                            string sch = "\"" + Path.Combine(Environment.SystemDirectory, "schtasks.exe") + "\" ";
+                            string cmd = sch + args;
+                            if (!string.IsNullOrEmpty(oldTask) && !string.Equals(oldTask, tn, StringComparison.OrdinalIgnoreCase))
+                                cmd = sch + "/Delete /F /TN \"" + oldTask + "\" >nul 2>&1 & " + cmd;
+                            int rc = Elevation.RunAndWait(Path.Combine(Environment.SystemDirectory, "cmd.exe"), "/d /s /c \"" + cmd + "\"");
+                            err = rc == 0 ? null : rc == -1 ? "F\u00fcr den Zeitplan mit Administratorrechten fehlt die Best\u00e4tigung von Windows."
+                                : "schtasks.exe meldet Fehler " + rc + " (mit Administratorrechten)";
+                        }
+                        else
+                        {
+                            err = Schtasks(args);
+                            if (err != null && Denied(err) && !Elevation.IsAdmin) err = SchtasksAdmin(args);
+                        }
                     }
                     catch (Exception ex) { err = ex.Message; }
                     finally { try { File.Delete(file); } catch { } }
@@ -87,7 +112,11 @@ namespace SyncPilot
         {
             StringBuilder t = new StringBuilder();
             DateTime today = DateTime.Today;
-            if (job.Schedule == ScheduleKind.Intervall)
+            if (job.Schedule == ScheduleKind.BeiAnmeldung)
+            {
+                t.Append("<LogonTrigger><Enabled>true</Enabled><UserId>" + X(Environment.UserDomainName + "\\" + Environment.UserName) + "</UserId></LogonTrigger>");
+            }
+            else if (job.Schedule == ScheduleKind.Intervall)
             {
                 int m = Math.Max(1, job.IntervalMinutes);
                 t.Append("<TimeTrigger><Repetition><Interval>PT" + m + "M</Interval><StopAtDurationEnd>false</StopAtDurationEnd></Repetition>");
@@ -112,7 +141,7 @@ namespace SyncPilot
                 "<RegistrationInfo><Author>Sync Pilot</Author><Description>" + X("Sync Pilot: " + job.Name) + "</Description></RegistrationInfo>" +
                 "<Triggers>" + t + "</Triggers>" +
                 "<Principals><Principal id=\"Author\"><UserId>" + X(user) + "</UserId><LogonType>InteractiveToken</LogonType>" +
-                "<RunLevel>LeastPrivilege</RunLevel></Principal></Principals>" +
+                "<RunLevel>" + (job.RunAsAdmin ? "HighestAvailable" : "LeastPrivilege") + "</RunLevel></Principal></Principals>" +
                 "<Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>" +
                 "<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>" +
                 "<AllowHardTerminate>true</AllowHardTerminate>" +
@@ -158,7 +187,10 @@ namespace SyncPilot
         {
             if (!string.IsNullOrEmpty(job.ScheduledTask))
             {
-                Schtasks("/Delete /F /TN \"" + job.ScheduledTask + "\"");
+                string args = "/Delete /F /TN \"" + job.ScheduledTask + "\"";
+                string err = Schtasks(args);
+                // mit Administratorrechten angelegt: Löschen nur als Administrator
+                if (err != null && Denied(err) && !Elevation.IsAdmin) SchtasksAdmin(args);
                 job.ScheduledTask = null;
             }
             try
@@ -167,6 +199,22 @@ namespace SyncPilot
                     if (k != null) k.DeleteValue(RunValue(job), false);
             }
             catch { }
+        }
+
+        static bool Denied(string err)
+        {
+            return err.IndexOf("Zugriff verweigert", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   err.IndexOf("Access is denied", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   err.IndexOf("0x80070005", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        /// <summary>schtasks.exe mit Administratorrechten (Windows fragt nach). Ohne Ausgabe – nur der Rückgabewert.</summary>
+        static string SchtasksAdmin(string args)
+        {
+            int rc = Elevation.RunAndWait(Path.Combine(Environment.SystemDirectory, "schtasks.exe"), args);
+            if (rc == 0) return null;
+            if (rc == -1) return "Für den Zeitplan mit Administratorrechten fehlt die Bestätigung von Windows.";
+            return "schtasks.exe meldet Fehler " + rc + " (mit Administratorrechten)";
         }
 
         static string Schtasks(string args)

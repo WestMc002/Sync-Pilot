@@ -1198,11 +1198,11 @@ namespace SyncPilot
                     PlanItem it = run.An.Actions[i];
                     string rel = it.IsDir ? it.Rel + "\\" : it.Rel;
                     if (rel != names[n] as string) return WebResponse_.Error(409, "Die Liste hat sich geändert – bitte erneut auswählen.");
-                    if (a == "Vorschlag") it.Chosen = it.Proposed;
+                    if (a == "Vorschlag") it.Choose(it.Proposed);
                     else
                     {
                         ActionKind k;
-                        if (Enum.TryParse(a, out k) && it.CanChoose(k)) it.Chosen = k;
+                        if (Enum.TryParse(a, out k) && it.CanChoose(k)) it.Choose(k);
                     }
                 }
                 run.Version++;

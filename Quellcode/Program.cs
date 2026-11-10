@@ -29,6 +29,7 @@ namespace SyncPilot
         //   "Sync Pilot.exe" /sync <ID|Name>  Oberflaeche oeffnen, Aufgabe analysieren und synchronisieren (Verknuepfung)
         //   "Sync Pilot.exe" --screenshots [Zielordner]   Screenshots fuer GitHub aus Beispieldaten
         //   "Sync Pilot.exe" /tray            unsichtbar im Infobereich starten (Autostart)
+        //   ... --neustart                    Neustart mit Administratorrechten: auf das Ende der alten Oberfläche warten
         //   "Sync Pilot.exe" /ordner-a <Pfad> Explorer-Kontextmenü: Ordner A merken
         //   "Sync Pilot.exe" /ordner-b <Pfad> Explorer-Kontextmenü: Ordner B, dann Richtung wählen
         //   "Sync Pilot.exe" /ordner-x        Explorer-Kontextmenü: Auswahl aufheben
@@ -70,15 +71,22 @@ namespace SyncPilot
             }
 
             bool tray = args.Any(x => x.Equals("/tray", StringComparison.OrdinalIgnoreCase));
+            bool restarted = args.Any(x => x.Equals("--neustart", StringComparison.OrdinalIgnoreCase));
+            // "Immer als Administrator starten": Oberfläche mit Administratorrechten neu starten (einmal, nicht im Kreis)
+            // Läuft die Oberfläche schon, holt der Start sie nur nach vorn – dafür keine Abfrage von Windows.
+            // Explorer-Menü: Ordnerpaar ist schon gewählt, ein zweiter Start würde erneut fragen.
+            if (!restarted && !explorer && !Elevation.IsAdmin && AppSettings.Current.AlwaysAdmin && !GuiRunning() &&
+                Elevation.Restart(Elevation.JoinArgs(args)))
+                return 0;
             // Neustart durch das Update-Hilfsskript: Ergebnis zeigen
             if (args.Any(x => x.Equals("--nach-update", StringComparison.OrdinalIgnoreCase))) MainForm.AfterUpdate = true;
 
             // Nur eine Oberfläche: ein zweiter Start holt das laufende Fenster nach vorn
             bool first;
-            using (Mutex single = new Mutex(true, "Local\\SyncPilot_GUI", out first))
+            using (Mutex single = Ipc.Mutex(true, "Local\\SyncPilot_GUI", out first))
             {
-                // Neustart nach dem Update: die alte Oberfläche gibt den Mutex gerade erst frei – darauf warten
-                if (!first && MainForm.AfterUpdate)
+                // Neustart nach dem Update bzw. mit Administratorrechten: die alte Oberfläche gibt den Mutex gerade erst frei – darauf warten
+                if (!first && (MainForm.AfterUpdate || restarted))
                 {
                     try { first = single.WaitOne(30000); }
                     catch (AbandonedMutexException) { first = true; }
@@ -106,6 +114,16 @@ namespace SyncPilot
                 WebServer.Stop();
             }
             return 0;
+        }
+
+        static bool GuiRunning()
+        {
+            try
+            {
+                using (Mutex m = Mutex.OpenExisting("Local\\SyncPilot_GUI", System.Security.AccessControl.MutexRights.Synchronize)) return true;
+            }
+            catch (WaitHandleCannotBeOpenedException) { return false; }
+            catch { return true; } // vorhanden, aber ohne Zugriff
         }
 
         static bool Signal(string name)

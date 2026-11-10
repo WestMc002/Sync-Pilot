@@ -109,6 +109,7 @@ namespace SyncPilot
             string stText; Color stFg, stBg;
             TasksView.Status(Last, out stText, out stFg, out stBg);
             if (Job.Disabled) { stText = "Deaktiviert"; stFg = Theme.Neutral; stBg = Theme.NeutralBg; }
+            if (owner.IsRunningNow(Job)) { stText = "L\u00e4uft \u2026"; stFg = Theme.AccentSoftText; stBg = Theme.AccentSoft; }
 
             int d = Theme.P(36), ix = Theme.P(14), iy = (Height - d) / 2;
             bool ok = TasksView.StatusKind(Last) <= 1;
@@ -331,6 +332,18 @@ namespace SyncPilot
         void OnTick(object sender, EventArgs e)
         {
             if (busy) stripText.Text = liveStatus;
+            // Läufe im Hintergrund (Ereignis, Zeitplan, Handy): etwa jede Sekunde nachsehen und "Läuft …" anzeigen
+            if (ticks % 7 == 0)
+            {
+                string sig = string.Join(",", Main.Jobs.Where(j => Runner.IsRunning(j.Id)).Select(j => j.Id).ToArray());
+                if (sig != runSig)
+                {
+                    bool ended = runSig.Length > 0;
+                    runSig = sig;
+                    if (ended && !busy) LoadHistory(); // ein Lauf ist fertig: Status gleich aktualisieren
+                    Invalidate(true);
+                }
+            }
             if (++ticks % 60 == 0 && !busy)
             {
                 DateTime s = Store.HistoryStamp();
@@ -376,9 +389,11 @@ namespace SyncPilot
             return job != null && lasts.TryGetValue(job.Id, out h) ? h : null;
         }
 
+        string runSig = "";
+
         public bool IsRunningNow(SyncJob job)
         {
-            return Runner.IsRunning(job.Id);
+            return runSig.Length > 0 && runSig.Contains(job.Id);
         }
 
         /// <summary>Filter-Plakette: alle, mit Zeitplan/Ereignis, Fehler/Konflikte, länger als 7 Tage nicht gelaufen.</summary>
@@ -1053,6 +1068,8 @@ namespace SyncPilot
                     "Sync Pilot", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
                 if (r != DialogResult.Yes) return;
             }
+            // Aufgaben mit Administratorrechten: ggf. als Administrator neu starten
+            if (!Main.EnsureAdmin(jobs, jobs.Count == 1 ? jobs[0].Id : null)) return;
 
             busy = true;
             cancel = false;

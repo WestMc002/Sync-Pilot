@@ -120,6 +120,8 @@ namespace SyncPilot
         public bool ScriptsOnlyWithChanges = true;
         /// <summary>Meldet das Skript vor dem Kopieren einen Fehler (Rückgabewert ungleich 0), nicht synchronisieren.</summary>
         public bool ScriptAbortOnError;
+        /// <summary>Mit Administratorrechten ausführen (Zeitplan: höchste Rechte; manuell: Sync Pilot als Administrator neu starten).</summary>
+        public bool RunAsAdmin;
         /// <summary>Nur noch zum Einlesen älterer Aufgaben (gemischte Liste, Ordner mit "\" am Ende); siehe Upgrade().</summary>
         public List<string> Excludes = new List<string>();
         /// <summary>Negativliste: Dateien bzw. Ordner mit diesem Namen oder Pfad nicht abgleichen.</summary>
@@ -536,7 +538,7 @@ namespace SyncPilot
 
         static void Locked(Action a)
         {
-            using (Mutex m = new Mutex(false, "Local\\SyncPilot_Store"))
+            using (Mutex m = Ipc.Mutex(false, "Local\\SyncPilot_Store"))
             {
                 bool own = false;
                 try

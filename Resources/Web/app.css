@@ -92,9 +92,12 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 .dot.warn { background: var(--warn); }
 .dot.err { background: var(--err); }
 .dot.none { background: var(--muted); opacity: .5; }
-.dot.live { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+/* läuft: drehender Ring statt Punkt – unterscheidet sich in Form und Farbe vom grünen „Aktuell“ */
+.dot.busy { width: 12px; height: 12px; box-sizing: border-box; background: none; border: 2px solid var(--purple);
+  border-top-color: transparent; animation: spin .9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 50% { opacity: .35; } }
-@media (prefers-reduced-motion: reduce) { .dot.live { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .dot.busy { animation: none; border-top-color: var(--purple); } }
 .grouprun { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .grouprun .grtext { flex: 1; min-width: 0; }
 .grouprun .name { font-weight: 600; }

@@ -202,6 +202,8 @@ namespace SyncPilot
             string cmd = (command ?? "").Trim();
             if (cmd.Length == 0) return 0;
             log.Line("Skript " + when + ": " + cmd);
+            if (job != null && job.RunAsAdmin && !Elevation.IsAdmin)
+                log.Line("Hinweis: Die Aufgabe soll mit Administratorrechten laufen, Sync Pilot l\u00e4uft aber ohne.");
             cmd = QuotePaths(cmd);
             try
             {

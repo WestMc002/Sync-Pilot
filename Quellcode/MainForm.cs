@@ -288,7 +288,7 @@ namespace SyncPilot
             {
                 try
                 {
-                    using (EventWaitHandle ev = new EventWaitHandle(false, EventResetMode.AutoReset, eventName))
+                    using (EventWaitHandle ev = Ipc.Event(eventName))
                         while (true)
                         {
                             ev.WaitOne();
@@ -351,6 +351,9 @@ namespace SyncPilot
             if (Demo.Active) return;
             string id = Shortcuts.TakePending();
             if (id == null) return;
+            // "A:" + ID: nach dem Neustart als Administrator nur analysieren (nicht gleich synchronisieren)
+            bool analyzeOnly = id.StartsWith("A:");
+            if (analyzeOnly) id = id.Substring(2);
             SyncJob job = Jobs.Find(j => j.Id == id) ?? Jobs.Find(j => string.Equals(j.Name, id, StringComparison.OrdinalIgnoreCase));
             if (job == null)
             {
@@ -362,7 +365,7 @@ namespace SyncPilot
                 MessageBox.Show(this, "Die Aufgabe \u201e" + job.Name + "\u201c ist deaktiviert.", "Sync Pilot", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
-            ShowAnalysis(job, true);
+            ShowAnalysis(job, !analyzeOnly);
         }
 
         /// <summary>Symbol im Infobereich zeigen, solange Hintergrundbetrieb an ist oder das Fenster versteckt ist.</summary>
@@ -393,8 +396,12 @@ namespace SyncPilot
                 MessageBox.Show("Am Handy wurde ein Abgleich gestartet, der noch l\u00e4uft. Trotzdem beenden?", "Sync Pilot",
                     MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
                 return;
-            if (Triggers.SomeBusy &&
-                MessageBox.Show("Ein automatisch gestarteter Abgleich l\u00e4uft noch. Abbrechen und beenden?", "Sync Pilot",
+            string[] busyNames = Triggers.BusyNames;
+            if (busyNames.Length > 0 &&
+                MessageBox.Show((busyNames.Length == 1
+                        ? "Der automatisch gestartete Abgleich \u201e" + busyNames[0] + "\u201c l\u00e4uft noch."
+                        : "Diese automatisch gestarteten Abgleiche laufen noch: " + string.Join(", ", Array.ConvertAll(busyNames, n => "\u201e" + n + "\u201c")) + ".") +
+                    "\n\nAbbrechen und beenden?", "Sync Pilot",
                     MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
                 return;
             exitRequested = true;
@@ -590,7 +597,51 @@ namespace SyncPilot
         }
 
         public void ShowTasks() { Navigate(new TasksView(this)); }
-        public void ShowAnalysis(SyncJob job, bool autoSync) { Navigate(new AnalysisView(this, job, autoSync)); }
+        public void ShowAnalysis(SyncJob job, bool autoSync)
+        {
+            if (job != null && !EnsureAdmin(new List<SyncJob> { job }, (autoSync ? "" : "A:") + job.Id)) return;
+            Navigate(new AnalysisView(this, job, autoSync));
+        }
+
+        /// <summary>
+        /// Aufgaben "mit Administratorrechten", Sync Pilot läuft ohne: als Administrator neu starten?
+        /// true = weitermachen (schon Administrator oder bewusst ohne), false = abgebrochen bzw. Neustart läuft.
+        /// pending: danach in der neuen Oberfläche starten (ID; "A:" + ID nur analysieren), null = nur neu starten.
+        /// </summary>
+        public bool EnsureAdmin(List<SyncJob> jobs, string pending)
+        {
+            if (Demo.Active || Elevation.IsAdmin) return true;
+            List<string> names = new List<string>();
+            foreach (SyncJob j in jobs) if (j.RunAsAdmin) names.Add("\u201e" + j.Name + "\u201c");
+            if (names.Count == 0) return true;
+            DialogResult r = MessageBox.Show(this,
+                (names.Count == 1 ? "Die Aufgabe " + names[0] + " soll" : "Die Aufgaben " + string.Join(", ", names.ToArray()) + " sollen") +
+                " mit Administratorrechten laufen, Sync Pilot l\u00e4uft aber ohne.\n\n" +
+                "Sync Pilot jetzt als Administrator neu starten?" + (pending == null ? " Danach bitte erneut starten." : "") + "\n\n" +
+                "\u201eNein\u201c f\u00fchrt sie ohne Administratorrechte aus \u2013 Befehle wie net stop schlagen dann fehl.",
+                "Sync Pilot", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+            if (r == DialogResult.No) return true;
+            if (r != DialogResult.Yes) return false;
+            RestartAsAdmin(pending);
+            return false;
+        }
+
+        /// <summary>Oberfläche mit Administratorrechten neu starten (Windows fragt nach); danach ggf. eine Aufgabe starten.</summary>
+        public void RestartAsAdmin(string pending)
+        {
+            if (pending != null) Shortcuts.SetPending(pending);
+            if (!Elevation.Restart(""))
+            {
+                if (pending != null) Shortcuts.TakePending();
+                MessageBox.Show(this, "Sync Pilot wurde nicht als Administrator gestartet \u2013 Windows hat nicht best\u00e4tigt.",
+                    "Sync Pilot", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            // die neue Oberfläche wartet, bis diese beendet ist
+            exitRequested = true;
+            if (!Visible) Show();
+            Close();
+        }
         public void ShowEdit(SyncJob job) { Navigate(new EditView(this, job)); }
         /// <summary>Protokoll eines Laufs grafisch; fromHistory: "Zurück" führt in den Verlauf, sonst zu den Aufgaben.</summary>
         public void ShowLog(HistoryEntry h, bool fromHistory) { if (h != null) Navigate(new LogView(this, h, fromHistory)); }

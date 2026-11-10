@@ -86,8 +86,36 @@ namespace SyncPilot
             }
         }
 
+        /// <summary>
+        /// Nur Schreibweise verschieden: Zielseite festlegen. toB = B bekommt die Schreibweise von A, sonst A die von B.
+        /// </summary>
+        public void SetCaseTarget(bool toB)
+        {
+            FileEntry src = toB ? A : B, tgt = toB ? B : A;
+            if (src == null || tgt == null) return;
+            From = tgt.Rel;
+            string name = src.Rel.Substring(src.Rel.LastIndexOf('\\') + 1);
+            int cut = From.LastIndexOf('\\');
+            Rel = cut < 0 ? name : From.Substring(0, cut) + "\\" + name;
+        }
+
+        /// <summary>Aktion wählen (Rechtsklick, Handy). Bei reiner Schreibweise heißt "Nach A/B": Schreibweise dorthin übernehmen.</summary>
+        public void Choose(ActionKind k)
+        {
+            if (CaseOnly)
+            {
+                if (k == ActionKind.NachB) k = ActionKind.UmbenennenB;
+                else if (k == ActionKind.NachA) k = ActionKind.UmbenennenA;
+                if (k == ActionKind.UmbenennenA || k == ActionKind.UmbenennenB) SetCaseTarget(k == ActionKind.UmbenennenB);
+            }
+            Chosen = k;
+        }
+
         public bool CanChoose(ActionKind k)
         {
+            // nur Schreibweise verschieden: in beide Richtungen angleichen oder auslassen
+            if (CaseOnly) return k == ActionKind.Keine || k == Proposed || k == ActionKind.NachA || k == ActionKind.NachB ||
+                                 k == ActionKind.UmbenennenA || k == ActionKind.UmbenennenB;
             // Umbenennung: nur annehmen oder überspringen (sonst liefen verdeckte Löschungen am alten Pfad mit)
             if (From != null) return k == Proposed || k == ActionKind.Keine;
             switch (k)
@@ -689,17 +717,21 @@ namespace SyncPilot
                 if (string.Equals(na, nb, StringComparison.Ordinal) || !string.Equals(na, nb, StringComparison.OrdinalIgnoreCase)) continue;
                 bool changedA = it.LastA != null && !it.LastA.CaseUnknown && !string.Equals(NameOf(it.LastA.Rel), na, StringComparison.Ordinal);
                 bool changedB = it.LastB != null && !it.LastB.CaseUnknown && !string.Equals(NameOf(it.LastB.Rel), nb, StringComparison.Ordinal);
-                bool toB;
+                bool? toB;
                 string reason;
                 if (job.Mode != SyncMode.Abgleichen) { toB = true; reason = "Schreibweise wie in A"; }
                 else if (changedA && !changedB) { toB = true; reason = "Schreibweise in A ge\u00e4ndert"; }
                 else if (changedB && !changedA) { toB = false; reason = "Schreibweise in B ge\u00e4ndert"; }
-                else { toB = true; reason = "Schreibweise unterschiedlich \u2013 wie in A"; }
+                // unbekannt, welche Seite geändert wurde (z. B. neue oder aus Easy2Sync übernommene Aufgabe):
+                // Konfliktregel A/B gewinnt, sonst nachfragen statt einfach die Schreibweise von A zu nehmen
+                else if (job.Conflicts == ConflictRule.AGewinnt) { toB = true; reason = "Schreibweise unterschiedlich \u2013 Regel: A gewinnt"; }
+                else if (job.Conflicts == ConflictRule.BGewinnt) { toB = false; reason = "Schreibweise unterschiedlich \u2013 Regel: B gewinnt"; }
+                else { toB = null; reason = "Schreibweise unterschiedlich (A: " + na + ", B: " + nb + ") \u2013 \u201eNach A\u201c oder \u201eNach B\u201c \u00fcbernimmt sie"; }
                 it.CaseOnly = true;
-                it.From = toB ? it.B.Rel : it.A.Rel;
-                it.Rel = ParentOf(it.From).Length > 0 ? ParentOf(it.From) + "\\" + (toB ? na : nb) : (toB ? na : nb);
-                Set(it, toB ? ActionKind.UmbenennenB : ActionKind.UmbenennenA,
-                    reason + " (" + (toB ? nb : na) + " \u2192 " + (toB ? na : nb) + ")");
+                if (toB == null) { Set(it, ActionKind.Konflikt, reason); continue; }
+                it.SetCaseTarget(toB.Value);
+                Set(it, toB.Value ? ActionKind.UmbenennenB : ActionKind.UmbenennenA,
+                    reason + " (" + (toB.Value ? nb : na) + " \u2192 " + (toB.Value ? na : nb) + ")");
             }
         }
 
@@ -1487,7 +1519,7 @@ namespace SyncPilot
                 bool own = false;
                 try
                 {
-                    mtx = new Mutex(false, "Local\\SyncPilot_Job_" + job.Id);
+                    mtx = Ipc.Mutex(false, "Local\\SyncPilot_Job_" + job.Id);
                     try { own = mtx.WaitOne(0); }
                     catch (AbandonedMutexException) { own = true; }
                     if (!own) throw new SyncException("Diese Aufgabe läuft bereits.");
@@ -1594,7 +1626,7 @@ namespace SyncPilot
         {
             try
             {
-                using (Mutex m = new Mutex(false, "Local\\SyncPilot_Job_" + jobId))
+                using (Mutex m = Ipc.Mutex(false, "Local\\SyncPilot_Job_" + jobId))
                 {
                     bool own;
                     try { own = m.WaitOne(0); }

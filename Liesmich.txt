@@ -300,10 +300,27 @@ Umbenennen und Verschieben
   ist ein früherer Abgleich (gespeicherter Stand), außer beim Spiegeln.
   Nur Groß-/Kleinschreibung geändert (z. B. "fotos" -> "Fotos"): wird auf der
   anderen Seite angeglichen, ohne neu zu kopieren ("Schreibweise in A
-  geändert"). Welche Seite geändert wurde, zeigt der gespeicherte Stand; ohne
-  ihn, beim Sichern und beim Spiegeln gilt die Schreibweise von A. Bei
-  Ständen aus älteren Versionen kennt Sync Pilot die Schreibweise in B noch
-  nicht – beim ersten Lauf gilt dann ebenfalls A.
+  geändert"). Welche Seite geändert wurde, zeigt der gespeicherte Stand.
+  Beim Sichern und beim Spiegeln gilt immer die Schreibweise von A. Beim
+  Abgleichen ohne gespeicherten Stand (neue oder aus Easy2Sync übernommene
+  Aufgabe, Stand aus älterer Version) fragt Sync Pilot nach (Konflikt) –
+  außer mit der Regel "A gewinnt" bzw. "B gewinnt". Rechtsklick
+  "Schreibweise von A nach B übernehmen" bzw. "von B nach A" legt die
+  Richtung fest, auch um einen Vorschlag umzudrehen.
+
+Administratorrechte
+  Befehle vor/nach dem Kopieren wie "net stop" brauchen Administratorrechte.
+  Je Aufgabe: "Für Profis" > "Mit Administratorrechten ausführen". Der
+  Zeitplan läuft dann mit höchsten Rechten ohne Nachfrage (Windows fragt
+  einmal beim Speichern; "Bei Anmeldung" läuft dafür über die
+  Aufgabenplanung). Manuell fragt Sync Pilot, ob es sich als Administrator
+  neu starten soll, und startet die Aufgabe danach.
+  Für das ganze Programm: Einstellungen > Hintergrund > "Immer als
+  Administrator starten" (Windows fragt bei jedem Start, auch beim
+  Autostart). Dann laufen auch Ereignisse und Handy-Aufträge so.
+  Als Administrator sind verbundene Netzlaufwerke (z. B. Z:) oft nicht
+  sichtbar – dann \\Server\Freigabe verwenden. /run aus einem eigenen Skript
+  läuft mit den Rechten dieses Skripts.
 
 Aufgabe deaktivieren
   In der Aufgabe "Aufgabe aktiv" ausschalten oder per Rechtsklick auf die

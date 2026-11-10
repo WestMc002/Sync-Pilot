@@ -407,6 +407,10 @@ namespace SyncPilot
         {
             List<PlanItem> sel = Selected();
             if (sel.Count == 0 || busy || showingResult) { e.Cancel = true; return; }
+            // nur Schreibweise verschieden: "Nach A/B" übernimmt die Schreibweise statt zu kopieren
+            bool caseOnly = sel.All(x => x.CaseOnly);
+            miToB.Text = job.Sides(caseOnly ? "Schreibweise von A nach B \u00fcbernehmen" : "Nach B kopieren");
+            miToA.Text = job.Sides(caseOnly ? "Schreibweise von B nach A \u00fcbernehmen" : "Nach A kopieren");
             miToB.Enabled = sel.Any(x => x.CanChoose(ActionKind.NachB));
             miToA.Enabled = sel.Any(x => x.CanChoose(ActionKind.NachA));
             miDelA.Enabled = sel.Any(x => x.CanChoose(ActionKind.LoeschenA));
@@ -423,14 +427,14 @@ namespace SyncPilot
         void Choose(ActionKind k)
         {
             foreach (PlanItem it in Selected())
-                if (it.CanChoose(k)) it.Chosen = k;
+                if (it.CanChoose(k)) it.Choose(k);
             list.Invalidate();
             UpdateUi();
         }
 
         void RestoreProposal()
         {
-            foreach (PlanItem it in Selected()) it.Chosen = it.Proposed;
+            foreach (PlanItem it in Selected()) it.Choose(it.Proposed);
             list.Invalidate();
             UpdateUi();
         }
