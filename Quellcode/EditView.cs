@@ -16,6 +16,12 @@ namespace SyncPilot
     {
         readonly SyncJob original;
         readonly bool isNew;
+        public override string PageTitle { get { return isNew ? "Neue Aufgabe" : "Aufgabe bearbeiten"; } }
+        protected override string ExtraState()
+        {
+            return string.Join(";", times.Select(t => t.Days + "@" + t.At).ToArray()) + "|" + customInterval + "|" +
+                   userA + "|" + passA + "|" + userB + "|" + passB + "|" + certA + "|" + certB;
+        }
 
         readonly Panel scroll, footer;
         readonly Label title;
@@ -58,6 +64,7 @@ namespace SyncPilot
         /// <summary>asNew: job ist nur eine Vorlage (z. B. aus dem Explorer) und wird als neue Aufgabe gespeichert.</summary>
         public EditView(MainForm main, SyncJob job, bool asNew) : base(main)
         {
+            TrackChanges();
             isNew = asNew;
             original = asNew ? null : job;
             SyncJob j = job != null ? job : new SyncJob();
@@ -82,9 +89,9 @@ namespace SyncPilot
             btnCancel = new FlatButton("Abbrechen", null, BtnKind.Secondary);
             btnSaveAnalyze = new FlatButton("Speichern & analysieren", null, BtnKind.Secondary);
             btnSave = new FlatButton("Speichern", Theme.GCheck, BtnKind.Primary);
-            btnCancel.Click += delegate { Main.ShowTasks(); };
-            btnSaveAnalyze.Click += delegate { SyncJob saved = Save(); if (saved != null) Main.ShowAnalysis(saved, false); };
-            btnSave.Click += delegate { if (Save() != null) Main.ShowTasks(); };
+            btnCancel.Click += delegate { DropChanges(); Main.ShowTasks(); }; // Abbrechen verwirft ohne Rückfrage
+            btnSaveAnalyze.Click += delegate { SyncJob saved = Save(); if (saved != null) { RememberState(); Main.ShowAnalysis(saved, false); } };
+            btnSave.Click += delegate { if (Save() != null) { RememberState(); Main.ShowTasks(); } };
             footer.Controls.AddRange(new Control[] { btnCancel, btnSaveAnalyze, btnSave });
             footer.Resize += delegate
             {
@@ -1134,7 +1141,7 @@ namespace SyncPilot
         // Knöpfen und Feldern mit Vorschlagsliste (Gruppe) beim jeweiligen Steuerelement.
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
-            if (keyData == Keys.Escape) { Main.ShowTasks(); return true; }
+            if (keyData == Keys.Escape) { DropChanges(); Main.ShowTasks(); return true; }
             if (keyData == Keys.Enter)
             {
                 Control c = this;

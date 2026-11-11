@@ -7,6 +7,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -32,6 +33,56 @@ namespace SyncPilot
         public virtual string NavKey { get { return ""; } }
         /// <summary>Welcher Eintrag links hervorgehoben wird (z. B. Protokoll: "history" oder "tasks").</summary>
         public virtual string NavHighlight { get { return NavKey; } }
+
+        // ----- Ungespeicherte Änderungen (Einstellungsseiten): Zustand beim Öffnen merken, vor dem Verlassen vergleichen -----
+        string cleanState;
+
+        /// <summary>Name der Seite für die Rückfrage „Änderungen verwerfen?“.</summary>
+        public virtual string PageTitle { get { return ""; } }
+
+        /// <summary>Zusätzlicher Zustand, der nicht in Eingabefeldern steht (z. B. neues Kennwort, Uhrzeitenliste).</summary>
+        protected virtual string ExtraState() { return ""; }
+
+        /// <summary>Jetziger Stand gilt als gespeichert (nach dem Öffnen und nach dem Speichern).</summary>
+        protected void RememberState() { cleanState = UiState.Of(this) + "\u0001" + ExtraState(); }
+
+        /// <summary>Änderungen bewusst verwerfen (Abbrechen) – danach keine Rückfrage mehr.</summary>
+        public void DropChanges() { cleanState = null; }
+
+        public bool HasChanges
+        {
+            get { return cleanState != null && !IsDisposed && cleanState != UiState.Of(this) + "\u0001" + ExtraState(); }
+        }
+
+        /// <summary>Für Einstellungsseiten: Stand nach dem Aufbau merken (alle Werte sind dann gesetzt).</summary>
+        protected void TrackChanges()
+        {
+            Load += delegate { BeginInvoke(new Action(RememberState)); };
+        }
+    }
+
+    /// <summary>Werte aller Eingaben einer Seite als Text (Schalter, Auswahl, Textfelder) – zum Vergleichen.</summary>
+    static class UiState
+    {
+        public static string Of(Control root)
+        {
+            StringBuilder sb = new StringBuilder();
+            Add(root, sb);
+            return sb.ToString();
+        }
+
+        static void Add(Control c, StringBuilder sb)
+        {
+            foreach (Control k in c.Controls)
+            {
+                if (k is CheckBox) sb.Append(((CheckBox)k).Checked ? '1' : '0');
+                else if (k is RadioButton) sb.Append(((RadioButton)k).Checked ? '1' : '0');
+                else if (k is ChoiceBox) sb.Append(((ChoiceBox)k).SelectedIndex).Append('|');
+                else if (k is ComboBox) sb.Append(((ComboBox)k).Text).Append('\u0002');
+                else if (k is TextBoxBase && !((TextBoxBase)k).ReadOnly) sb.Append(((TextBoxBase)k).Text).Append('\u0002');
+                Add(k, sb);
+            }
+        }
     }
 
     public class MainForm : Form
@@ -574,6 +625,11 @@ namespace SyncPilot
                 v.Dispose();
                 return false;
             }
+            if (!ConfirmLeave())
+            {
+                v.Dispose();
+                return false;
+            }
             host.SuspendLayout();
             BaseView old = current;
             current = v;
@@ -597,6 +653,22 @@ namespace SyncPilot
         }
 
         public void ShowTasks() { Navigate(new TasksView(this)); }
+
+        /// <summary>
+        /// Seite mit ungespeicherten Änderungen verlassen (Navigation, Fenster schließen)? Ohne Änderungen keine Rückfrage.
+        /// Vorauswahl „Nein“ = auf der Seite bleiben.
+        /// </summary>
+        public bool ConfirmLeave()
+        {
+            if (current == null || !current.HasChanges) return true;
+            if (!Visible) Show();
+            string page = current.PageTitle.Length > 0 ? " \u201e" + current.PageTitle + "\u201c" : "";
+            if (MessageBox.Show(this, "Die \u00c4nderungen auf der Seite" + page + " sind noch nicht gespeichert.\n\n\u00c4nderungen verwerfen?",
+                    "Sync Pilot", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+                return false;
+            current.DropChanges();
+            return true;
+        }
         public void ShowAnalysis(SyncJob job, bool autoSync)
         {
             if (job != null && !EnsureAdmin(new List<SyncJob> { job }, (autoSync ? "" : "A:") + job.Id)) return;
@@ -907,6 +979,19 @@ namespace SyncPilot
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            // ungespeicherte Änderungen: erst nachfragen (nicht beim Abmelden/Herunterfahren von Windows)
+            if (e.CloseReason == CloseReason.UserClosing && current != null && current.HasChanges)
+            {
+                if (!ConfirmLeave())
+                {
+                    e.Cancel = true;
+                    exitRequested = false;
+                    closeAfterCancel = false;
+                    return;
+                }
+                // Fenster geht nur in den Infobereich: verworfene Werte nicht stehen lassen
+                if (!exitRequested && tray != null && AppSettings.Current.Background) ShowTasks();
+            }
             // Fenster schließen = im Infobereich weiterlaufen (außer bei "Beenden" oder Windows-Abmeldung)
             if (!exitRequested && tray != null && e.CloseReason == CloseReason.UserClosing && AppSettings.Current.Background)
             {

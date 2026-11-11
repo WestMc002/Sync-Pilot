@@ -452,9 +452,12 @@ Navigation
 
 Hintergrund und Handy-Zugriff (Seite "Einstellungen")
   Änderungen werden erst mit "Speichern" (rechts unter den Karten, Enter)
-  übernommen; "Abbrechen" (Esc) oder der Wechsel zu einer anderen Seite
-  verwirft sie. Fehler stehen rot links neben den Knöpfen, nach dem
-  Speichern geht es zurück zu den Aufgaben mit einer kurzen Meldung. Der Webserver startet dabei nur neu, wenn nötig (Ein/Aus, Port, HTTPS,
+  übernommen; "Abbrechen" (Esc) verwirft sie. Wer mit ungespeicherten
+  Änderungen zu einer anderen Seite wechselt oder das Fenster schließt,
+  wird gefragt, ob sie verworfen werden sollen (gilt auch beim Bearbeiten
+  einer Aufgabe). Fehler stehen rot links neben den Knöpfen; nach dem
+  Speichern bleibt die Seite offen und oben erscheint eine kurze Meldung.
+  Der Webserver startet dabei nur neu, wenn nötig (Ein/Aus, Port, HTTPS,
   Zertifikat). Auch ein neues Kennwort und "Alle Handys abmelden" gelten
   erst beim Speichern.
   Im Infobereich weiterlaufen  Beim Schließen des Fensters läuft Sync Pilot

@@ -61,9 +61,12 @@ namespace SyncPilot
         bool pendingLogoutAll;   // "Alle Handys abmelden" erst beim Speichern
 
         public override string NavKey { get { return "settings"; } }
+        public override string PageTitle { get { return "Einstellungen"; } }
+        protected override string ExtraState() { return (pendingPass ?? "") + "|" + pendingLogoutAll; }
 
         public SettingsView(MainForm main) : base(main)
         {
+            TrackChanges();
             AppSettings s = AppSettings.Current;
             scroll = new ScrollPanel();
             scroll.Dock = DockStyle.Fill;
@@ -821,6 +824,7 @@ namespace SyncPilot
 
         void Discard()
         {
+            DropChanges(); // Abbrechen verwirft ohne Rückfrage
             BeginInvoke(new Action(delegate { Main.Navigate(new SettingsView(Main)); }));
         }
 
@@ -972,6 +976,7 @@ namespace SyncPilot
             loading = true;
             address.Text = s.WebHost ?? "";
             loading = false;
+            RememberState(); // gespeichert: keine Rückfrage beim Neuaufbau oder Neustart
             // kurze Meldung oben im Hauptfenster
             string done = s.WebEnabled && WebServer.Running ? "Gespeichert · Steuerung per Handy: " + WebServer.PhoneUrl() + "/"
                         : s.WebEnabled ? "Gespeichert · Steuerung per Handy: nicht gestartet – " + (WebServer.LastError ?? "unbekannter Fehler")
