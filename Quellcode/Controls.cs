@@ -987,7 +987,23 @@ namespace SyncPilot
                 // mit Graphics messen: sonst rechnet Windows trotz NoPadding einen Zuschlag ein (Rand rechts größer als links)
                 Size size;
                 using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
+                {
                     size = TextRenderer.MeasureText(g, text, TipFont, new Size(Theme.P(400), 0), Flags);
+                    // Umbrochener Text: Windows zählt das Leerzeichen am Zeilenende mit, der Rand rechts wird zu groß.
+                    // Deshalb die kleinste Breite suchen, die dieselbe Höhe (Zeilenzahl) ergibt.
+                    int line = TextRenderer.MeasureText(g, "Ag", TipFont, Size.Empty, Flags).Height;
+                    if (size.Height > line)
+                    {
+                        int lo = 1, hi = size.Width;
+                        while (lo < hi)
+                        {
+                            int mid = (lo + hi) / 2;
+                            if (TextRenderer.MeasureText(g, text, TipFont, new Size(mid, 0), Flags).Height <= size.Height) hi = mid;
+                            else lo = mid + 1;
+                        }
+                        size.Width = lo;
+                    }
+                }
                 e.ToolTipSize = new Size(size.Width + 2 * Theme.P(8) + 1, size.Height + 2 * Theme.P(5)); // 1 px Reserve
             };
             Draw += delegate (object s, DrawToolTipEventArgs e)

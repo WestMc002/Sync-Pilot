@@ -90,7 +90,7 @@ namespace SyncPilot
         public List<SyncJob> Jobs;
         readonly Panel header, nav, navSpacer, host;
         readonly FlatButton navMenu, navPin;
-        readonly System.Windows.Forms.Timer navTimer;
+        readonly System.Windows.Forms.Timer navTimer, navHoverTimer;
         bool navOpen;
         readonly SignatureFooter footer;
         readonly FlatButton navTasks, navHistory, navSettings, navQuit;
@@ -211,6 +211,21 @@ namespace SyncPilot
                 if (!nav.RectangleToScreen(nav.ClientRectangle).Contains(Cursor.Position)) { navOpen = false; ApplyNav(); }
             };
             navTimer.Start();
+            // nicht angepinnt: verweilt die Maus ca. 400 ms auf der eingeklappten Navigation, klappt sie aus
+            // (kurzes Überfahren auf dem Weg zum Inhalt löst nichts aus; einklappen übernimmt navTimer)
+            navHoverTimer = new System.Windows.Forms.Timer();
+            navHoverTimer.Interval = 400;
+            navHoverTimer.Tick += delegate
+            {
+                navHoverTimer.Stop();
+                if (AppSettings.Current.NavPinned || navOpen) return;
+                if (!nav.RectangleToScreen(nav.ClientRectangle).Contains(Cursor.Position)) return;
+                navOpen = true;
+                ApplyNav();
+            };
+            nav.ControlAdded += delegate (object s, ControlEventArgs e) { HookNavHover(e.Control); };
+            HookNavHover(nav);
+            foreach (Control c in nav.Controls) HookNavHover(c); // ☰ und Stecknadel sind schon drin
             navTasks = NavButton("Aufgaben", Theme.GSwitch);
             navHistory = NavButton("Verlauf", Theme.GHistory);
             navSettings = NavButton("Einstellungen", Theme.GSettings);
@@ -479,6 +494,18 @@ namespace SyncPilot
                 tray.Dispose();
             }
             base.OnFormClosed(e);
+        }
+
+        void HookNavHover(Control c)
+        {
+            c.MouseEnter += delegate
+            {
+                if (!AppSettings.Current.NavPinned && !navOpen && !navHoverTimer.Enabled) navHoverTimer.Start();
+            };
+            c.MouseLeave += delegate
+            {
+                if (!nav.RectangleToScreen(nav.ClientRectangle).Contains(Cursor.Position)) navHoverTimer.Stop();
+            };
         }
 
         FlatButton NavButton(string text, string glyph)

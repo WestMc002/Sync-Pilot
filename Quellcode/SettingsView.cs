@@ -23,6 +23,10 @@ namespace SyncPilot
     public class SettingsView : BaseView
     {
         readonly Panel scroll;
+        // Alles liegt auf einer Inhaltsfläche: Windows blättert nur diese eine Fläche, ihre Höhe ist der Bildlaufbereich.
+        // (Vorher lagen die Karten direkt im Bildlauf und wurden mit der Bildlaufposition verrechnet – dabei konnte
+        // der Inhalt nach oben „wegrutschen“, unten blieb eine große leere Fläche.)
+        readonly Panel content;
         readonly Label title;
         readonly Card cBack, cExplorer, cLogs, cPhone, cTls, cNet, cOpen, cImport;
         readonly ChoiceBox cbLogDays, cbAfterAll;
@@ -75,9 +79,13 @@ namespace SyncPilot
             scroll.HandleCreated += delegate { Theme.DarkScroll(scroll); };
             scroll.Resize += delegate { LayoutAll(); };
             Controls.Add(scroll);
+            content = new Panel();
+            content.BackColor = Theme.Bg;
+            content.Location = Point.Empty;
+            scroll.Controls.Add(content);
 
             title = Ui.Label("Einstellungen", Theme.H1, Theme.Text, Theme.Bg);
-            scroll.Controls.Add(title);
+            content.Controls.Add(title);
 
             // ---------- Hintergrund ----------
             cBack = Section("Hintergrund");
@@ -303,7 +311,7 @@ namespace SyncPilot
             saveMsg = Ui.WrapLabel("", Theme.Body, Theme.TextDim, Theme.Bg);
             btnSave.Click += delegate { Save(); };
             btnCancel.Click += delegate { Discard(); };
-            scroll.Controls.AddRange(new Control[] { btnSave, btnCancel, saveMsg });
+            content.Controls.AddRange(new Control[] { btnSave, btnCancel, saveMsg });
             tWeb.CheckedChanged += delegate { WebToggled(); };
             tHttps.CheckedChanged += delegate { HttpsToggled(); };
             tInternet.CheckedChanged += delegate { InternetToggled(); };
@@ -553,7 +561,7 @@ namespace SyncPilot
             Label h = Ui.Label(heading, Theme.H2, Theme.Text, Theme.Surface);
             h.Location = new Point(Theme.P(20), Theme.P(16));
             c.Controls.Add(h);
-            scroll.Controls.Add(c);
+            content.Controls.Add(c);
             return c;
         }
 
@@ -628,8 +636,10 @@ namespace SyncPilot
             try
             {
                 int pad = Theme.P(28), gap = Theme.P(16);
-                int W = Math.Max(Theme.P(420), Math.Min(scroll.ClientSize.Width - 2 * pad, Theme.P(1200)));
-                int y0 = scroll.AutoScrollPosition.Y;
+                // feste Breite ohne Bildlaufleiste: sonst springt beim Ein-/Ausblenden der Leiste auch eine waagrechte Leiste ein
+                int cw = Math.Max(Theme.P(420) + 2 * pad, scroll.Width - SystemInformation.VerticalScrollBarWidth);
+                int W = Math.Max(Theme.P(420), Math.Min(cw - 2 * pad, Theme.P(1200)));
+                int y0 = 0;
                 title.Location = new Point(pad - Theme.P(3), y0 + Theme.P(20));
                 int y = y0 + Theme.P(84);
                 cBack.SetBounds(pad, y, W, cBack.Height);
@@ -669,7 +679,7 @@ namespace SyncPilot
                 btnCancel.Location = new Point(btnSave.Left - Theme.P(10) - btnCancel.Width, y);
                 saveMsg.SetBounds(pad, y, Math.Max(Theme.P(40), btnCancel.Left - pad - Theme.P(12)), btnSave.Height);
                 y += btnSave.Height;
-                scroll.AutoScrollMinSize = new Size(0, y + Theme.P(24) - y0);
+                content.Size = new Size(cw, y + Theme.P(24));
             }
             finally { laying = false; }
         }

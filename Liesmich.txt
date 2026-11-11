@@ -448,7 +448,8 @@ Explorer-Kontextmenü (Seite "Einstellungen" > Explorer)
 Navigation
   Links oben ☰ klappt die Navigation ein (nur Symbole) bzw. aus. Mit der
   Stecknadel bleibt sie ausgeklappt (angepinnt); sonst klappt sie über dem
-  Inhalt auf und nach der Auswahl wieder zu.
+  Inhalt auf und nach der Auswahl wieder zu. Nicht angepinnt klappt sie
+  auch aus, wenn die Maus kurz auf ihr verweilt.
 
 Hintergrund und Handy-Zugriff (Seite "Einstellungen")
   Änderungen werden erst mit "Speichern" (rechts unter den Karten, Enter)

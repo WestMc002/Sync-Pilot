@@ -544,6 +544,37 @@ namespace SyncPilot
             items.Add(new MenuSpacer((int)Math.Round(BottomSpace * scale)));
         }
 
+        /// <summary>
+        /// Menü bei mehreren Bildschirmen im Arbeitsbereich des Bildschirms halten, auf dem es aufgeht
+        /// (sonst ragt es an der Bildschirmkante auf den Nachbarbildschirm).
+        /// </summary>
+        public static void KeepOnScreen(ToolStripDropDown dd)
+        {
+            try
+            {
+                // Bildschirm des Ursprungs: Element, an dem das Menü hängt, sonst die Maus
+                Point origin = Cursor.Position;
+                ContextMenuStrip cms = dd as ContextMenuStrip;
+                if (cms != null && cms.SourceControl != null && !cms.SourceControl.RectangleToScreen(cms.SourceControl.ClientRectangle).Contains(origin))
+                    origin = cms.SourceControl.PointToScreen(new Point(cms.SourceControl.Width / 2, cms.SourceControl.Height / 2));
+                ToolStripDropDownItem owner = dd.OwnerItem as ToolStripDropDownItem;
+                if (owner != null && owner.Owner != null && owner.Owner.IsHandleCreated)
+                    origin = owner.Owner.PointToScreen(new Point(owner.Bounds.X + owner.Bounds.Width / 2, owner.Bounds.Y + owner.Bounds.Height / 2));
+                Rectangle wa = Screen.FromPoint(origin).WorkingArea;
+                Rectangle b = dd.Bounds;
+                int x = Math.Max(wa.Left, Math.Min(b.X, wa.Right - b.Width));
+                int y = Math.Max(wa.Top, Math.Min(b.Y, wa.Bottom - b.Height));
+                // Untermenü, das rechts nicht mehr passt: links neben dem Eintrag statt darüber
+                if (owner != null && b.Right > wa.Right && owner.Owner != null)
+                {
+                    int left = owner.Owner.PointToScreen(new Point(owner.Bounds.X, 0)).X - b.Width;
+                    if (left >= wa.Left) x = left;
+                }
+                if (x != b.X || y != b.Y) dd.Location = new Point(x, y);
+            }
+            catch { }
+        }
+
         public static void RoundCorners(ToolStripDropDown dd)
         {
             try
@@ -598,7 +629,7 @@ namespace SyncPilot
                 MenuHelper.AddBottomSpacer(menu, Scale);
                 Compact(menu);
             };
-            menu.Opened += (s, e) => MenuHelper.RoundCorners(menu);
+            menu.Opened += (s, e) => { MenuHelper.KeepOnScreen(menu); MenuHelper.RoundCorners(menu); };
             return menu;
         }
 
@@ -664,7 +695,7 @@ namespace SyncPilot
             MenuHelper.NoLegacyShadow(dd);
             MenuHelper.AddEdgeSpacers(dd, (int)(4 * Scale));
             MenuHelper.AddBottomSpacer(dd, Scale);
-            dd.Opened += (s, e) => MenuHelper.RoundCorners(dd);
+            dd.Opened += (s, e) => { MenuHelper.KeepOnScreen(dd); MenuHelper.RoundCorners(dd); };
         }
     }
 }
