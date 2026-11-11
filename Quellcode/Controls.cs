@@ -994,7 +994,12 @@ namespace SyncPilot
                     int line = TextRenderer.MeasureText(g, "Ag", TipFont, Size.Empty, Flags).Height;
                     if (size.Height > line)
                     {
+                        // Untergrenze: das breiteste Wort bzw. die breiteste Zeile ohne Leerzeichen (z. B. ein Pfad).
+                        // Windows trennt Wörter nicht – schmaler würde nur abschneiden, die Höhe bliebe gleich.
                         int lo = 1, hi = size.Width;
+                        foreach (string word in text.Split(new[] { ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+                            lo = Math.Max(lo, TextRenderer.MeasureText(g, word, TipFont, Size.Empty, Flags & ~TextFormatFlags.WordBreak).Width);
+                        lo = Math.Min(lo, hi);
                         while (lo < hi)
                         {
                             int mid = (lo + hi) / 2;

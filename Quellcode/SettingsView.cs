@@ -78,6 +78,7 @@ namespace SyncPilot
             scroll.BackColor = Theme.Bg;
             scroll.HandleCreated += delegate { Theme.DarkScroll(scroll); };
             scroll.Resize += delegate { LayoutAll(); };
+            scroll.HandleCreated += delegate { BeginInvoke(new Action(LayoutAll)); };
             Controls.Add(scroll);
             content = new Panel();
             content.BackColor = Theme.Bg;
@@ -632,6 +633,10 @@ namespace SyncPilot
         void LayoutAll()
         {
             if (cOpen == null || laying) return;
+            // Noch nicht an seinem Platz (beim Aufbau ist die Seite nur 150 px breit) oder minimiert: nicht anordnen.
+            // Sonst entsteht eine einspaltige, sehr hohe Anordnung, deren Bildlaufbereich Windows danach nicht mehr
+            // verkleinert – unten blieb eine große leere Fläche.
+            if (!scroll.IsHandleCreated || scroll.Width < Theme.P(400) || scroll.Height < Theme.P(100)) return;
             laying = true;
             try
             {
@@ -680,6 +685,7 @@ namespace SyncPilot
                 saveMsg.SetBounds(pad, y, Math.Max(Theme.P(40), btnCancel.Left - pad - Theme.P(12)), btnSave.Height);
                 y += btnSave.Height;
                 content.Size = new Size(cw, y + Theme.P(24));
+                scroll.PerformLayout(); // Bildlaufbereich gleich an die neue Höhe anpassen (auch kleiner)
             }
             finally { laying = false; }
         }

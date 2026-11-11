@@ -77,6 +77,7 @@ namespace SyncPilot
             scroll.BackColor = Theme.Bg;
             scroll.HandleCreated += delegate { Theme.DarkScroll(scroll); };
             scroll.Resize += delegate { LayoutSections(); };
+            scroll.HandleCreated += delegate { BeginInvoke(new Action(LayoutSections)); };
 
             footer = new Panel();
             footer.Dock = DockStyle.Bottom;
@@ -844,6 +845,8 @@ namespace SyncPilot
         void LayoutSections()
         {
             if (cSched == null || cEvt == null || cPro == null || title == null) return;
+            // wie in den Einstellungen: nicht anordnen, solange die Seite noch nicht an ihrem Platz bzw. minimiert ist
+            if (!scroll.IsHandleCreated || scroll.Width < Theme.P(400) || scroll.Height < Theme.P(100)) return;
             int pad = Theme.P(28), gap = Theme.P(16);
             int W = Math.Min(scroll.ClientSize.Width - 2 * pad, Theme.P(1180));
             int y0 = scroll.AutoScrollPosition.Y;
