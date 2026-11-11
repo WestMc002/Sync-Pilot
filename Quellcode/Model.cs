@@ -599,6 +599,38 @@ namespace SyncPilot
             Locked(delegate { Write(JobsFile, f); });
         }
 
+        /// <summary>
+        /// Aufgaben in eine Datei exportieren (Sicherung, anderer PC). Kennwörter bleiben weg: Sie sind an den
+        /// Windows-Benutzer gebunden (DPAPI) und wären woanders nicht lesbar.
+        /// </summary>
+        public static void ExportJobs(List<SyncJob> jobs, string file)
+        {
+            JobFile f = new JobFile();
+            foreach (SyncJob j in jobs)
+            {
+                SyncJob c = j.Clone();
+                c.PassA = null;
+                c.PassB = null;
+                c.ScheduledTask = null;
+                f.Jobs.Add(c);
+            }
+            Write(file, f);
+        }
+
+        /// <summary>Exportierte Aufgaben lesen (ohne Kennwörter und ohne Verweis auf eine geplante Aufgabe).</summary>
+        public static List<SyncJob> ReadExport(string file)
+        {
+            List<SyncJob> list = Read<JobFile>(file).Jobs;
+            foreach (SyncJob j in list)
+            {
+                j.Upgrade();
+                j.PassA = null;
+                j.PassB = null;
+                j.ScheduledTask = null;
+            }
+            return list;
+        }
+
         public static List<HistoryEntry> LoadHistory()
         {
             if (Demo.Active) return Demo.History();

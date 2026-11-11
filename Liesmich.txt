@@ -232,7 +232,8 @@ Gespeicherten Stand zurücksetzen
   Dateien werden kopiert, nichts wird gelöscht.
 
 Aufgaben aus Easy2Sync übernehmen
-  Einstellungen > "Aufgaben übernehmen" > Datei easy2sync.sdb auswählen.
+  Einstellungen > "Aufgaben exportieren und importieren" > "Aus Easy2Sync"
+  > Datei easy2sync.sdb auswählen.
   Übernommen werden Name, Ordner, Richtung (Replikation als "Spiegeln
   A -> B"), "inklusive Unterverzeichnisse", Filterlisten (inkl. der globalen Vorgaben von
   Easy2Sync), Bezeichnungen der Seiten, Sperrdatei und Befehle vor/nach dem
@@ -307,6 +308,19 @@ Umbenennen und Verschieben
   außer mit der Regel "A gewinnt" bzw. "B gewinnt". Rechtsklick
   "Schreibweise von A nach B übernehmen" bzw. "von B nach A" legt die
   Richtung fest, auch um einen Vorschlag umzudrehen.
+
+Aufgaben exportieren und importieren
+  Einstellungen > "Aufgaben exportieren und importieren".
+  Exportieren speichert alle Aufgaben in einer XML-Datei – als Sicherung
+  oder für einen anderen PC. Kennwörter werden nicht mitgespeichert (sie
+  sind an den Windows-Benutzer gebunden), nach dem Importieren bitte neu
+  eintragen. Gespeicherte Stände, Verlauf und Einstellungen sind nicht
+  enthalten.
+  Importieren lässt vorhandene Aufgaben unverändert; Aufgaben mit gleichem
+  Namen in derselben Gruppe werden ausgelassen. Aufgaben mit Zeitplan oder
+  Ereignis-Start lassen sich aktiv oder deaktiviert übernehmen. Der erste
+  Lauf gleicht ab wie beim ersten Mal (nichts wird gelöscht). Die ID bleibt
+  erhalten, wenn sie frei ist – Aufrufe mit /run gehen dann weiter.
 
 Administratorrechte
   Befehle vor/nach dem Kopieren wie "net stop" brauchen Administratorrechte.

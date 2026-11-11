@@ -967,12 +967,12 @@ namespace SyncPilot
 
     /// <summary>
     /// Tooltip im Programmdesign (Globale Richtlinien, „Weitere Fenster“): Kartenfarbe, 1 px Rand, Textfarbe,
-    /// Segoe UI 9 pt, Innenabstand 10 × 6, Umbruch bei 400 (je × Skalierung). Statt new ToolTip() überall verwenden.
+    /// Segoe UI 9 pt, Innenabstand 8 × 5 an allen Seiten, Umbruch bei 400 (je × Skalierung), 15 s sichtbar. Statt new ToolTip() überall verwenden.
     /// </summary>
     public sealed class ModernToolTip : ToolTip
     {
         static readonly Font TipFont = new Font("Segoe UI", 9f);
-        const TextFormatFlags Flags = TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix | TextFormatFlags.Left | TextFormatFlags.Top;
+        const TextFormatFlags Flags = TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding | TextFormatFlags.Left | TextFormatFlags.Top;
         string shownText;
 
         public ModernToolTip()
@@ -984,14 +984,17 @@ namespace SyncPilot
             Popup += delegate (object s, PopupEventArgs e)
             {
                 string text = shownText ?? (e.AssociatedControl != null ? GetToolTip(e.AssociatedControl) : null) ?? "";
-                Size size = TextRenderer.MeasureText(text, TipFont, new Size(Theme.P(400), 0), Flags);
-                e.ToolTipSize = new Size(size.Width + Theme.P(20), size.Height + Theme.P(12));
+                // mit Graphics messen: sonst rechnet Windows trotz NoPadding einen Zuschlag ein (Rand rechts größer als links)
+                Size size;
+                using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
+                    size = TextRenderer.MeasureText(g, text, TipFont, new Size(Theme.P(400), 0), Flags);
+                e.ToolTipSize = new Size(size.Width + 2 * Theme.P(8) + 1, size.Height + 2 * Theme.P(5)); // 1 px Reserve
             };
             Draw += delegate (object s, DrawToolTipEventArgs e)
             {
                 using (SolidBrush back = new SolidBrush(Theme.Surface)) e.Graphics.FillRectangle(back, e.Bounds);
                 using (Pen pen = new Pen(Theme.Border)) e.Graphics.DrawRectangle(pen, 0, 0, e.Bounds.Width - 1, e.Bounds.Height - 1);
-                Rectangle r = new Rectangle(Theme.P(10), Theme.P(6), e.Bounds.Width - Theme.P(20), e.Bounds.Height - Theme.P(12));
+                Rectangle r = new Rectangle(Theme.P(8), Theme.P(5), e.Bounds.Width - 2 * Theme.P(8), e.Bounds.Height - 2 * Theme.P(5));
                 TextRenderer.DrawText(e.Graphics, e.ToolTipText, TipFont, r, Theme.Text, Flags);
             };
         }

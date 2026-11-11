@@ -103,17 +103,39 @@ namespace SyncPilot
             cExplorer.Height = Theme.P(56 + 64 + 12);
 
             // ---------- Aufgaben übernehmen ----------
-            cImport = Section("Aufgaben übernehmen");
+            cImport = Section("Aufgaben exportieren und importieren");
+            Label lExp = Ui.Label("Aufgaben exportieren", Theme.Body, Theme.Text, Theme.Surface);
+            Label lExpDesc = Ui.WrapLabel("Speichert alle Aufgaben in einer Datei – als Sicherung oder für einen anderen PC. " +
+                "Kennwörter werden nicht mitgespeichert.", Theme.Small, Theme.TextDim, Theme.Surface);
+            FlatButton btnExp = new FlatButton("Exportieren \u2026", "\uEDE1", BtnKind.Secondary);
+            btnExp.Click += delegate { ExportJobs(); };
+            Label lInp = Ui.Label("Aufgaben importieren", Theme.Body, Theme.Text, Theme.Surface);
+            Label lInpDesc = Ui.WrapLabel("Liest eine exportierte Datei ein. Vorhandene Aufgaben bleiben unverändert; " +
+                "Aufgaben mit gleichem Namen in derselben Gruppe werden ausgelassen.", Theme.Small, Theme.TextDim, Theme.Surface);
+            FlatButton btnInp = new FlatButton("Importieren \u2026", "\uE8B5", BtnKind.Secondary);
+            btnInp.Click += delegate { ImportJobs(); };
+            cImport.Controls.AddRange(new Control[] { lExp, lExpDesc, btnExp, lInp, lInpDesc, btnInp });
             Label lImp = Ui.Label("Aus Easy2Sync", Theme.Body, Theme.Text, Theme.Surface);
             Label lImpDesc = Ui.WrapLabel("Übernimmt Name, Ordner, Richtung, Filter, Bezeichnungen, Sperrdatei und Befehle aus der Datei " +
                 "easy2sync.sdb. Kennwörter, Zeitplan und Ordnerüberwachung bitte danach selbst eintragen.", Theme.Small, Theme.TextDim, Theme.Surface);
             FlatButton btnImp = new FlatButton("Datei auswählen \u2026", Theme.GFolder, BtnKind.Secondary);
             btnImp.Click += delegate { ImportEasy2Sync(); };
             cImport.Controls.AddRange(new Control[] { lImp, lImpDesc, btnImp });
-            cImport.Height = Theme.P(56 + 64 + 12);
+            cImport.Height = Theme.P(56 + 3 * 64 + 12);
             cImport.Resize += delegate
             {
                 int y = Theme.P(52);
+                // gleiche Knopfbreite, damit die drei Knöpfe bündig untereinander stehen
+                int bw = Math.Max(btnImp.Width, Math.Max(btnExp.Width, btnInp.Width));
+                btnExp.Width = btnInp.Width = btnImp.Width = bw;
+                btnExp.Location = new Point(cImport.Width - Theme.P(20) - bw, y + (Theme.P(64) - btnExp.Height) / 2);
+                lExp.Location = new Point(Theme.P(20), y + Theme.P(10));
+                lExpDesc.SetBounds(Theme.P(20), y + Theme.P(30), Math.Max(10, btnExp.Left - Theme.P(32)), Theme.Small.Height * 2 + Theme.P(2));
+                y += Theme.P(64);
+                btnInp.Location = new Point(cImport.Width - Theme.P(20) - bw, y + (Theme.P(64) - btnInp.Height) / 2);
+                lInp.Location = new Point(Theme.P(20), y + Theme.P(10));
+                lInpDesc.SetBounds(Theme.P(20), y + Theme.P(30), Math.Max(10, btnInp.Left - Theme.P(32)), Theme.Small.Height * 2 + Theme.P(2));
+                y += Theme.P(64);
                 btnImp.Location = new Point(cImport.Width - Theme.P(20) - btnImp.Width, y + (Theme.P(64) - btnImp.Height) / 2);
                 lImp.Location = new Point(Theme.P(20), y + Theme.P(10));
                 lImpDesc.SetBounds(Theme.P(20), y + Theme.P(30), Math.Max(10, btnImp.Left - Theme.P(32)), Theme.Small.Height * 2 + Theme.P(2));
@@ -314,6 +336,116 @@ namespace SyncPilot
         // =============== Aufbau ===============
 
         /// <summary>Aufgaben aus einer easy2sync.sdb lesen, Liste zeigen und nach Rückfrage anlegen (nur manuell, ohne Zeitplan).</summary>
+        void ExportJobs()
+        {
+            if (Main.Jobs.Count == 0)
+            {
+                MessageBox.Show("Es gibt noch keine Aufgaben zum Exportieren.", "Sync Pilot", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            string file;
+            using (SaveFileDialog d = new SaveFileDialog())
+            {
+                d.Title = "Aufgaben exportieren";
+                d.Filter = "Sync-Pilot-Aufgaben (*.xml)|*.xml";
+                d.DefaultExt = "xml";
+                d.FileName = "Sync Pilot Aufgaben " + DateTime.Now.ToString("yyyy-MM-dd") + ".xml";
+                if (d.ShowDialog(this) != DialogResult.OK) return;
+                file = d.FileName;
+            }
+            try { Store.ExportJobs(Main.Jobs, file); }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Die Datei konnte nicht geschrieben werden:\n" + ex.Message, "Sync Pilot", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            int withPass = Main.Jobs.Count(j => !string.IsNullOrEmpty(j.PassA) || !string.IsNullOrEmpty(j.PassB));
+            MessageBox.Show(Main.Jobs.Count + (Main.Jobs.Count == 1 ? " Aufgabe wurde" : " Aufgaben wurden") + " exportiert." +
+                (withPass > 0 ? "\n\nKennwörter sind nicht enthalten – bei " + withPass + (withPass == 1 ? " Aufgabe" : " Aufgaben") +
+                    " nach dem Importieren neu eintragen." : ""),
+                "Sync Pilot", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        void ImportJobs()
+        {
+            string file;
+            using (OpenFileDialog d = new OpenFileDialog())
+            {
+                d.Title = "Exportierte Aufgaben auswählen";
+                d.Filter = "Sync-Pilot-Aufgaben (*.xml)|*.xml|Alle Dateien (*.*)|*.*";
+                if (d.ShowDialog(this) != DialogResult.OK) return;
+                file = d.FileName;
+            }
+            List<SyncJob> found;
+            try { found = Store.ReadExport(file); }
+            catch (Exception)
+            {
+                MessageBox.Show("Die Datei ist keine Aufgabenliste von Sync Pilot oder nicht lesbar.", "Sync Pilot", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            // Doppelt ist, was es mit gleichem Namen in derselben Gruppe schon gibt (auch innerhalb der Datei)
+            HashSet<string> names = new HashSet<string>(Main.Jobs.Select(x => (x.Group ?? "").Trim() + "\n" + x.Name), StringComparer.OrdinalIgnoreCase);
+            List<SyncJob> fresh = new List<SyncJob>();
+            foreach (SyncJob j in found)
+                if (!string.IsNullOrWhiteSpace(j.Name) && names.Add((j.Group ?? "").Trim() + "\n" + j.Name)) fresh.Add(j);
+            int dup = found.Count - fresh.Count;
+            if (fresh.Count == 0)
+            {
+                MessageBox.Show(found.Count == 0 ? "In der Datei wurden keine Aufgaben gefunden."
+                    : "Alle " + found.Count + " Aufgaben gibt es in Sync Pilot schon (gleicher Name und gleiche Gruppe).", "Sync Pilot", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine(fresh.Count + (fresh.Count == 1 ? " Aufgabe" : " Aufgaben") + " gefunden" +
+                (dup > 0 ? " (" + dup + " mit schon vorhandenem Namen werden ausgelassen)" : "") + ":");
+            sb.AppendLine();
+            foreach (SyncJob j in fresh.Take(15))
+                sb.AppendLine("• " + (string.IsNullOrWhiteSpace(j.Group) ? "" : j.Group + " › ") + j.Name + "  –  " + j.ModeText);
+            if (fresh.Count > 15) sb.AppendLine("• … und " + (fresh.Count - 15) + " weitere");
+            sb.AppendLine();
+            sb.AppendLine("Der erste Lauf gleicht ab wie beim ersten Mal: Was nur auf einer Seite liegt, wird kopiert, " +
+                "nichts wird gelöscht. Bitte vorher „Analysieren“. Kennwörter bitte neu eintragen.");
+
+            int auto = fresh.Count(j => !j.Disabled && (j.Schedule != ScheduleKind.Manuell || j.HasEvents));
+            bool asDisabled = false;
+            if (auto > 0)
+            {
+                DialogResult r = MessageBox.Show(sb.ToString() + "\n" + auto + (auto == 1 ? " Aufgabe startet" : " Aufgaben starten") +
+                    " von selbst (Zeitplan oder Ereignis).\n\n" +
+                    "Ja = so übernehmen, Zeitplan und Ereignisse sind gleich aktiv\n" +
+                    "Nein = diese Aufgaben deaktiviert übernehmen und später einzeln einschalten",
+                    "Sync Pilot", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
+                if (r == DialogResult.Cancel) return;
+                asDisabled = r == DialogResult.No;
+            }
+            else if (MessageBox.Show(sb.ToString() + "\nJetzt übernehmen?", "Sync Pilot", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+
+            HashSet<string> ids = new HashSet<string>(Main.Jobs.Select(x => x.Id ?? ""), StringComparer.OrdinalIgnoreCase);
+            List<string> errors = new List<string>();
+            int disabledNow = 0;
+            foreach (SyncJob j in fresh)
+            {
+                // die ID bleibt, wenn sie frei ist (Aufrufe mit /run gehen dann weiter), sonst eine neue
+                if (string.IsNullOrEmpty(j.Id) || !ids.Add(j.Id)) { j.Id = Guid.NewGuid().ToString("N"); ids.Add(j.Id); }
+                if (asDisabled && !j.Disabled && (j.Schedule != ScheduleKind.Manuell || j.HasEvents)) { j.Disabled = true; disabledNow++; }
+                Main.Jobs.Add(j);
+                StateStore.Reset(j.Id); // neu anfangen, nicht nach einem verlorenen Stand fragen
+                if (!j.Disabled && j.Schedule != ScheduleKind.Manuell)
+                {
+                    string err = Scheduler.Apply(j);
+                    if (err != null) errors.Add(j.Name + ": " + err);
+                }
+            }
+            Main.SaveJobs();
+            string msg = fresh.Count + (fresh.Count == 1 ? " Aufgabe wurde" : " Aufgaben wurden") + " importiert.";
+            if (disabledNow > 0)
+                msg += "\n\n" + disabledNow + (disabledNow == 1 ? " davon ist" : " davon sind") + " deaktiviert" +
+                    (AppSettings.Current.HideDisabled ? " und gerade ausgeblendet – in der Aufgabenliste über das Auge einblenden." : ".");
+            if (errors.Count > 0)
+                msg += "\n\nZeitplan nicht eingerichtet:\n" + string.Join("\n", errors.Take(10).Select(x => "• " + x));
+            MessageBox.Show(msg, "Sync Pilot", MessageBoxButtons.OK, errors.Count > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
+        }
+
         void ImportEasy2Sync()
         {
             string file;

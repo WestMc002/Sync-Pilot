@@ -68,6 +68,16 @@ namespace SyncPilot
             return p;
         }
 
+        /// <summary>
+        /// Skript mit Fehler: seine Ausgabe auch unter "Alle" zeigen (sonst nur unter "Skript & Hinweise"),
+        /// damit man gleich sieht, woran es lag (z. B. "Zugriff verweigert").
+        /// </summary>
+        void ShowScriptOutput()
+        {
+            for (int k = Entries.Count - 1; k >= 0 && Entries[k].Kind == LogKind.ScriptOut; k--)
+                Entries[k].Kind = LogKind.Script;
+        }
+
         void Add(string line)
         {
             if (line == null || line.Trim().Length == 0) return;
@@ -159,8 +169,8 @@ namespace SyncPilot
             {
                 Set(e, LogKind.Script, "Skript", null, null);
                 int i = s.IndexOf(": ");
-                if (s.StartsWith("Skript beendet")) { e.Text = s; if (!s.EndsWith(" 0")) e.Kind = LogKind.Warn; }
-                else if (s.StartsWith("Skript konnte") || s.StartsWith("Skript abgebrochen")) { e.Kind = LogKind.Warn; e.Chip = "Skript"; e.Text = s; }
+                if (s.StartsWith("Skript beendet")) { e.Text = s; if (!s.EndsWith(" 0")) { e.Kind = LogKind.Warn; ShowScriptOutput(); } }
+                else if (s.StartsWith("Skript konnte") || s.StartsWith("Skript abgebrochen")) { e.Kind = LogKind.Warn; e.Chip = "Skript"; e.Text = s; ShowScriptOutput(); }
                 else if (i > 0) { e.Text = s.Substring(i + 2); e.Detail = s.Substring(0, i); }
                 else e.Text = s;
                 return;
