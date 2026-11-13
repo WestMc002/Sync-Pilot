@@ -99,6 +99,11 @@ namespace SyncPilot
         public bool UseRecycleBin = true;
         public bool IncludeHidden;
         public bool CompareContent;
+        /// <summary>
+        /// Nur bei Konflikten (beide Seiten geändert, gleiche Größe) den Inhalt vergleichen: gleicher Inhalt ist kein Konflikt.
+        /// Schneller als CompareContent, weil nur die wenigen Konflikt-Dateien gelesen werden. Standard: an.
+        /// </summary>
+        public bool CompareOnConflict = true;
         /// <summary>Gleiche Größe und genau 1 Stunde Zeitunterschied gilt als gleich (Sommerzeit auf FAT-Laufwerken, NAS).</summary>
         public bool IgnoreDstOffset = true;
         /// <summary>Unterordner einbeziehen (aus: nur die Dateien direkt im gewählten Ordner, wie Easy2Sync ohne „inklusive Unterverzeichnisse“).</summary>

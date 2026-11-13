@@ -300,11 +300,11 @@ namespace SyncPilot
                 SetupTray();
                 Triggers.Finished += TriggerFinished;
                 Triggers.Apply(Jobs);
-                // Update-Prüfung still kurz nach dem Start (höchstens einmal täglich, abschaltbar im Info-Fenster),
-                // auch wenn Sync Pilot nur im Infobereich startet
+                // Update-Prüfung still kurz nach jedem Start (abschaltbar im Info-Fenster), auch wenn Sync Pilot nur im
+                // Infobereich startet – beim Start ohne die 20-Stunden-Sperre
                 System.Windows.Forms.Timer updTimer = new System.Windows.Forms.Timer();
                 updTimer.Interval = 15000;
-                updTimer.Tick += async delegate { updTimer.Stop(); updTimer.Dispose(); await CheckForUpdates(false); };
+                updTimer.Tick += async delegate { updTimer.Stop(); updTimer.Dispose(); await CheckForUpdates(false, true); };
                 updTimer.Start();
                 // läuft oft tagelang im Infobereich: alle 6 Stunden nachsehen, ob die Prüfung fällig ist (höchstens alle 20 Stunden)
                 System.Windows.Forms.Timer updRepeat = new System.Windows.Forms.Timer();
@@ -759,6 +759,13 @@ namespace SyncPilot
                 AppSettings.Current.Save();
             };
             hooks.CheckNow = delegate { return CheckForUpdates(true); };
+            hooks.AutoInstall = delegate { return AppSettings.Current.AutoUpdate; };
+            hooks.SetAutoInstall = delegate (bool on)
+            {
+                AppSettings.Current.AutoUpdate = on;
+                AppSettings.Current.Save();
+                if (on && available != null) TryAutoUpdate();
+            };
             hooks.CanInstall = delegate { return available != null && !string.IsNullOrEmpty(available.ZipUrl) && Updater.InstallBlocker() == null; };
             hooks.Install = async delegate { await InstallUpdate(); };
             hooks.OpenPage = OpenReleasePage;
@@ -807,11 +814,13 @@ namespace SyncPilot
             more = msg.Length > 0 ? msg : ex.GetType().Name;
         }
 
-        async Task<UpdateStatus> CheckForUpdates(bool manual)
+        Task<UpdateStatus> CheckForUpdates(bool manual) { return CheckForUpdates(manual, false); }
+
+        async Task<UpdateStatus> CheckForUpdates(bool manual, bool atStart)
         {
             if (Demo.Active || updateRunning) return UpdateState(); // Screenshots: keine Prüfung
             AppSettings st = AppSettings.Current;
-            if (!manual && (!st.UpdateCheck || (DateTime.UtcNow - st.LastUpdateCheck.ToUniversalTime()).TotalHours < 20)) return UpdateState();
+            if (!manual && (!st.UpdateCheck || (!atStart && (DateTime.UtcNow - st.LastUpdateCheck.ToUniversalTime()).TotalHours < 20))) return UpdateState();
             updateRunning = true;
             try
             {
@@ -825,6 +834,12 @@ namespace SyncPilot
                     available = release;
                     ShowUpdateBar(true);
                     UpdateTrayMenu();
+                    // „Automatisch aktualisieren“: gleich installieren (bzw. sobald nichts mehr läuft), ohne Hinweis vorher
+                    if (st.AutoUpdate && !manual && Updater.InstallBlocker() == null && !string.IsNullOrEmpty(release.ZipUrl))
+                    {
+                        BeginInvoke(new Action(TryAutoUpdate));
+                        return UpdateState();
+                    }
                     // Hinweis am Infobereich, einmal je Version und Programmstart; Klick startet das Update
                     if (tray != null && tray.Visible && balloonShownFor != release.Version)
                     {
@@ -921,17 +936,54 @@ namespace SyncPilot
             Ui.Open(available != null && !string.IsNullOrEmpty(available.PageUrl) ? available.PageUrl : Updater.ReleasesPage);
         }
 
-        async Task InstallUpdate()
+        System.Windows.Forms.Timer autoUpdateRetry;
+
+        /// <summary>
+        /// Automatisches Update: nur, wenn gerade kein Abgleich läuft und keine Seite ungespeicherte Änderungen hat –
+        /// sonst alle 5 Minuten erneut versuchen.
+        /// </summary>
+        void TryAutoUpdate()
+        {
+            if (available == null || updating || !AppSettings.Current.AutoUpdate) return;
+            bool busy = (current != null && current.Busy) || RemoteRun.SomeBusy || Triggers.SomeBusy ||
+                        (current != null && current.HasChanges) || DialogOpen();
+            if (busy)
+            {
+                if (autoUpdateRetry == null)
+                {
+                    autoUpdateRetry = new System.Windows.Forms.Timer();
+                    autoUpdateRetry.Interval = 5 * 60 * 1000;
+                    autoUpdateRetry.Tick += delegate { autoUpdateRetry.Stop(); TryAutoUpdate(); };
+                }
+                autoUpdateRetry.Stop();
+                autoUpdateRetry.Start();
+                return;
+            }
+            BeginInvoke(new Action(async delegate { await InstallUpdate(true); }));
+        }
+
+        /// <summary>Ist gerade ein Dialog offen (Bearbeiten, Info-Fenster, Meldung …)? Dann nicht mittendrin beenden.</summary>
+        static bool DialogOpen()
+        {
+            foreach (Form f in Application.OpenForms)
+                if (f.Visible && f.Modal) return true;
+            return false;
+        }
+
+        Task InstallUpdate() { return InstallUpdate(false); }
+
+        async Task InstallUpdate(bool automatic)
         {
             if (updating || available == null) return;
             if ((current != null && current.Busy) || RemoteRun.SomeBusy || Triggers.SomeBusy)
             {
+                if (automatic) { TryAutoUpdate(); return; }
                 MessageBox.Show(this, "Es läuft gerade ein Abgleich. Bitte warten, bis er fertig ist, und dann aktualisieren.", "Update",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
-            if (Updater.InstallBlocker() != null) { OpenReleasePage(); return; }
-            if (MessageBox.Show(this, "Sync Pilot wird beendet, auf Version " + available.Version + " aktualisiert und neu gestartet. Einstellungen bleiben erhalten.",
+            if (Updater.InstallBlocker() != null) { if (!automatic) OpenReleasePage(); return; }
+            if (!automatic && MessageBox.Show(this, "Sync Pilot wird beendet, auf Version " + available.Version + " aktualisiert und neu gestartet. Einstellungen bleiben erhalten.",
                     "Update", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK)
                 return;
             updating = true;
@@ -940,19 +992,28 @@ namespace SyncPilot
             try
             {
                 ReleaseInfo rel = available;
+                bool hidden = !Visible; // im Infobereich: nach dem Update wieder dort starten
                 await Updater.Install(rel, delegate (int percent)
                 {
                     try { BeginInvoke(new Action(delegate { updateBar.Text = "Lade Version " + rel.Version + " … " + percent + " %"; })); } catch { }
-                });
+                }, hidden);
                 updateBar.Text = "Update wird installiert – Sync Pilot startet gleich neu.";
                 // ganz beenden (nicht nur in den Infobereich), damit das Hilfsskript die EXE ersetzen kann
                 exitRequested = true;
                 closeAfterCancel = false;
-                if (!Visible) Show();
+                if (!Visible) { if (automatic) startHidden = true; Show(); } // automatisch: Fenster nicht aufblitzen lassen
                 Close();
             }
             catch (Exception ex)
             {
+                if (automatic)
+                {
+                    // automatisch: keine Meldung mitten in der Arbeit – Hinweisleiste bleibt, Fehler steht im Info-Fenster
+                    UpdateCheckError(ex, out updateError, out updateErrorMore);
+                    updateBar.Text = text;
+                    foreach (FlatButton b in new FlatButton[] { updateBar.Install, updateBar.Page, updateBar.Later }) b.Enabled = true;
+                    return;
+                }
                 MessageBox.Show(this, ex.Message, "Update", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 updateBar.Text = text;
                 foreach (FlatButton b in new FlatButton[] { updateBar.Page, updateBar.Later }) b.Enabled = true;

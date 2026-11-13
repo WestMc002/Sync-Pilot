@@ -42,6 +42,8 @@ namespace SyncPilot
         public List<string> CollapsedGroups = new List<string>();
         /// <summary>Beim Start auf GitHub nach einer neuen Version sehen (höchstens einmal täglich).</summary>
         public bool UpdateCheck = true;
+        /// <summary>Neue Version gleich selbst installieren (ohne Rückfrage, sobald kein Abgleich läuft). Standard: aus.</summary>
+        public bool AutoUpdate;
         public DateTime LastUpdateCheck;
         /// <summary>Webseite für Handy und Tablet.</summary>
         public bool WebEnabled;

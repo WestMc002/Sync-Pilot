@@ -161,7 +161,12 @@ Protokoll anzeigen
 
 Optionen
   Löschungen übernehmen, In den Papierkorb, Versteckte Dateien,
-  Inhalt vergleichen (bei gleicher Größe, aber anderem Datum).
+  Inhalt immer vergleichen (bei gleicher Größe, aber anderem Datum; langsam,
+  weil beide Seiten gelesen werden).
+  Inhalt nur bei Konflikten vergleichen (Standard): Wurde eine Datei auf
+  beiden Seiten geändert und ist gleich groß, prüft Sync Pilot den Inhalt.
+  Ist er gleich (nur das Datum weicht ab), ist es kein Konflikt. Liest nur
+  diese wenigen Dateien und ist deshalb kaum langsamer.
   Unterordner einbeziehen (Standard): aus = nur die Dateien direkt im
   gewählten Ordner abgleichen (wie Easy2Sync ohne "inklusive Unterver-
   zeichnisse"). Ein früher bei den Ordnern eingetragenes "*" wird in diese
@@ -295,7 +300,7 @@ Umbenennen und Verschieben
   zieht Sync Pilot das auf der anderen Seite nach, statt alles zu löschen und
   neu zu kopieren ("Ordner umbenennen in B" bzw. "Umbenennen in B"). Erkannt
   wird das am Inhalt: gleiche Dateien mit gleicher Größe und Zeit (bei
-  Ordnern der ganze Inhalt; mit "Inhalt vergleichen" auch am Inhalt). Nur
+  Ordnern der ganze Inhalt; mit "Inhalt immer vergleichen" auch am Inhalt). Nur
   eindeutige Fälle; sonst wie bisher löschen und kopieren. Rechtsklick >
   "Überspringen" lässt die Umbenennung für diesen Lauf aus. Voraussetzung
   ist ein früherer Abgleich (gespeicherter Stand), außer beim Spiegeln.
@@ -403,9 +408,18 @@ Updates
   (github.com/WestMc002/Sync-Pilot, Releases). Dabei wird nur die
   öffentliche Release-Liste gelesen; es werden keine Daten übertragen und
   keine Anmeldung gebraucht.
-  - Kurz nach dem Start wird still geprüft, höchstens einmal täglich (auch
-    wenn Sync Pilot nur im Infobereich läuft). Abschaltbar im Info-Fenster
-    (Klick auf die Versionsnummer): Schalter "Automatisch prüfen".
+  - Kurz nach jedem Start wird still geprüft (auch wenn Sync Pilot nur im
+    Infobereich läuft). Abschaltbar im Info-Fenster (Klick auf die
+    Versionsnummer): Schalter "Automatisch prüfen".
+  - Schalter "Automatisch aktualisieren" (darunter, Standard aus, nur mit
+    "Automatisch prüfen"): Findet die automatische Prüfung eine neue
+    Version, installiert Sync Pilot sie ohne Rückfrage und startet neu -
+    im Infobereich, wenn das Fenster vorher zu war. Läuft gerade ein
+    Abgleich, ist ein Dialog offen oder hat die Seite ungespeicherte
+    Änderungen, wartet es und versucht es alle 5 Minuten erneut. Unter
+    "Programme" fragt Windows dabei nach Administratorrechten, außer Sync
+    Pilot läuft schon als Administrator ("Immer als Administrator
+    starten").
   - Im Info-Fenster zeigt die Zeile "Updates" den Stand mit Symbol (Aktuell,
     Version x verfügbar, Prüfung nicht möglich, Noch nicht geprüft) und
     darunter, wann zuletzt geprüft wurde. Der Knopf rechts heißt "Jetzt
@@ -423,7 +437,7 @@ Updates
   - Im Infobereich: einmal je Version und Programmstart ein Hinweis (Klick
     startet das Update) und oben im Menü fett "Update auf ... installieren".
     Läuft Sync Pilot tagelang, sieht es alle 6 Stunden nach, ob die Prüfung
-    fällig ist.
+    fällig ist (höchstens einmal in 20 Stunden).
   - Liegt der Programmordner unter "Programme" o. ä. ohne Schreibrechte,
     fragt Windows beim Aktualisieren nach Administratorrechten.
   - Im Projektordner (mit Erstellen.bat) wird nie ersetzt, weil dort die EXE

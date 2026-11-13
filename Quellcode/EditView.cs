@@ -24,6 +24,8 @@ namespace SyncPilot
         }
 
         readonly Panel scroll, footer;
+        readonly Panel content; // alle Karten; der Bildlaufbereich richtet sich nach seiner Größe (wie in den Einstellungen)
+        bool laying;
         readonly Label title;
         readonly Card cFolders, cMode, cExcl, cOpts, cSched, cEvt, cPro;
         readonly InputBox name, folderA, folderB, exFiles, exDirs, inFiles, inDirs, nameA, nameB, groupBox;
@@ -37,7 +39,7 @@ namespace SyncPilot
         readonly DeviceCombo devA, devB;
         string userA, passA, userB, passB, certA, certB;
         readonly ModeCard mSync, mBackup, mMirror;
-        readonly ToggleSwitch tDeletes, tRecycle, tHidden, tContent, tActive, tDst, tRights, tVersions, tSubdirs;
+        readonly ToggleSwitch tDeletes, tRecycle, tHidden, tContent, tContentConflict, tActive, tDst, tRights, tVersions, tSubdirs;
         readonly InputBox minSize, maxSize;
         readonly Label lDeletesDesc;
         readonly ChoiceBox cbSchedule, cbInterval, cbEvtGap;
@@ -78,6 +80,10 @@ namespace SyncPilot
             scroll.HandleCreated += delegate { Theme.DarkScroll(scroll); };
             scroll.Resize += delegate { LayoutSections(); };
             scroll.HandleCreated += delegate { BeginInvoke(new Action(LayoutSections)); };
+            content = new Panel();
+            content.BackColor = Theme.Bg;
+            content.Location = Point.Empty;
+            scroll.Controls.Add(content);
 
             footer = new Panel();
             footer.Dock = DockStyle.Bottom;
@@ -106,7 +112,7 @@ namespace SyncPilot
             };
 
             title = Ui.Label(isNew ? "Neue Aufgabe" : "Aufgabe bearbeiten", Theme.H1, Theme.Text, Theme.Bg);
-            scroll.Controls.Add(title);
+            content.Controls.Add(title);
 
             // --- Ordner ---
             cFolders = Section("Ordner");
@@ -316,6 +322,8 @@ namespace SyncPilot
             tRecycle.Checked = j.UseRecycleBin;
             tHidden.Checked = j.IncludeHidden;
             tContent.Checked = j.CompareContent;
+            tContentConflict = new ToggleSwitch();
+            tContentConflict.Checked = j.CompareOnConflict;
             tDst = new ToggleSwitch();
             tRights = new ToggleSwitch();
             tVersions = new ToggleSwitch();
@@ -325,12 +333,12 @@ namespace SyncPilot
             tSubdirs = new ToggleSwitch();
             tSubdirs.Checked = j.IncludeSubdirs;
             lDeletesDesc = null;
-            const int Rows = 9, RowH = 74;
+            const int Rows = 10, RowH = 74;
             Label[] rowsTitle = new Label[Rows];
             Label[] rowsDesc = new Label[Rows];
-            ToggleSwitch[] toggles = { tActive, tSubdirs, tDeletes, tRecycle, tVersions, tHidden, tContent, tDst, tRights };
+            ToggleSwitch[] toggles = { tActive, tSubdirs, tDeletes, tRecycle, tVersions, tHidden, tContent, tContentConflict, tDst, tRights };
             string[] titles = { "Aufgabe aktiv", "Unterordner einbeziehen", "Löschungen übernehmen", "In den Papierkorb", "Ältere Versionen aufbewahren", "Versteckte Dateien",
-                "Inhalt vergleichen", "Sommerzeit-Versatz ignorieren", "NTFS-Rechte übertragen" };
+                "Inhalt immer vergleichen", "Inhalt nur bei Konflikten vergleichen", "Sommerzeit-Versatz ignorieren", "NTFS-Rechte übertragen" };
             string[] descs =
             {
                 "Aus: läuft nicht nach Zeitplan und nicht bei „Alle synchronisieren“",
@@ -339,7 +347,8 @@ namespace SyncPilot
                 "Gelöschte Dateien landen im Papierkorb statt endgültig weg zu sein",
                 "Überschriebene und gelöschte Dateien kommen vorher in den Ordner „" + Engine.VersionsDir + "“ derselben Seite",
                 "Auch versteckte und Systemdateien abgleichen",
-                "Bei gleicher Größe, aber anderem Datum den Inhalt prüfen (langsamer)",
+                "Bei gleicher Größe, aber anderem Datum immer den Inhalt prüfen (langsam: liest beide Seiten)",
+                "Nur wenn beide Seiten geändert wurden und gleich groß sind: gleicher Inhalt ist dann kein Konflikt",
                 "Gleiche Größe und genau 1 Stunde Zeitunterschied gilt als gleich (FAT-Laufwerke, USB-Sticks, manche NAS)",
                 "Zugriffsrechte von Dateien und Ordnern mitkopieren – nur zwischen Windows-Laufwerken und -Freigaben"
             };
@@ -356,6 +365,9 @@ namespace SyncPilot
                 lt.Click += delegate { if (tg.Enabled) tg.Checked = !tg.Checked; };
             }
             lDeletesDesc = rowsDesc[2];
+            // „immer vergleichen“ deckt Konflikte schon mit ab
+            tContentConflict.Enabled = !tContent.Checked;
+            tContent.CheckedChanged += delegate { tContentConflict.Enabled = !tContent.Checked; };
             cOpts.Height = Theme.P(56 + Rows * RowH + 8);
             cOpts.Paint += delegate (object s, PaintEventArgs e)
             {
@@ -814,7 +826,7 @@ namespace SyncPilot
             Label h = Ui.Label(heading, Theme.H2, Theme.Text, Theme.Surface);
             h.Location = new Point(Theme.P(20), Theme.P(16));
             c.Controls.Add(h);
-            scroll.Controls.Add(c);
+            content.Controls.Add(c);
             return c;
         }
 
@@ -844,29 +856,40 @@ namespace SyncPilot
 
         void LayoutSections()
         {
-            if (cSched == null || cEvt == null || cPro == null || title == null) return;
+            if (cSched == null || cEvt == null || cPro == null || title == null || laying) return;
             // wie in den Einstellungen: nicht anordnen, solange die Seite noch nicht an ihrem Platz bzw. minimiert ist
             if (!scroll.IsHandleCreated || scroll.Width < Theme.P(400) || scroll.Height < Theme.P(100)) return;
-            int pad = Theme.P(28), gap = Theme.P(16);
-            int W = Math.Min(scroll.ClientSize.Width - 2 * pad, Theme.P(1180));
-            int y0 = scroll.AutoScrollPosition.Y;
-            title.Location = new Point(pad - Theme.P(3), y0 + Theme.P(20));
-            int top = y0 + Theme.P(84);
-            if (W >= Theme.P(860))
+            laying = true;
+            try
             {
-                int lw = (int)((W - gap) * 0.6), rw = W - gap - lw, x2 = pad + lw + gap;
-                int y = top;
-                foreach (Card c in new Card[] { cFolders, cMode, cExcl, cPro }) { c.SetBounds(pad, y, lw, c.Height); y += c.Height + gap; }
-                int y2 = top;
-                foreach (Card c in new Card[] { cOpts, cSched, cEvt }) { c.SetBounds(x2, y2, rw, c.Height); y2 += c.Height + gap; }
-                scroll.AutoScrollMinSize = new Size(0, Math.Max(y, y2) - y0 + Theme.P(8));
+                // Karten liegen in „content“ (immer ab 0, unabhängig von der Bildlaufposition); dessen Höhe bestimmt den
+                // Bildlaufbereich. Vorher wurde der Bereich über AutoScrollMinSize gesetzt und passte nach dem Blättern
+                // bzw. Größerwerden einer Karte nicht immer – unten ließ sich nicht weiter blättern.
+                int pad = Theme.P(28), gap = Theme.P(16);
+                // feste Breite ohne Bildlaufleiste: sonst springt beim Ein-/Ausblenden der Leiste auch eine waagrechte Leiste ein
+                int cw = Math.Max(Theme.P(300) + 2 * pad, scroll.Width - SystemInformation.VerticalScrollBarWidth);
+                int W = Math.Min(cw - 2 * pad, Theme.P(1180));
+                title.Location = new Point(pad - Theme.P(3), Theme.P(20));
+                int top = Theme.P(84), bottom;
+                if (W >= Theme.P(860))
+                {
+                    int lw = (int)((W - gap) * 0.6), rw = W - gap - lw, x2 = pad + lw + gap;
+                    int y = top;
+                    foreach (Card c in new Card[] { cFolders, cMode, cExcl, cPro }) { c.SetBounds(pad, y, lw, c.Height); y += c.Height + gap; }
+                    int y2 = top;
+                    foreach (Card c in new Card[] { cOpts, cSched, cEvt }) { c.SetBounds(x2, y2, rw, c.Height); y2 += c.Height + gap; }
+                    bottom = Math.Max(y, y2);
+                }
+                else
+                {
+                    int y = top;
+                    foreach (Card c in new Card[] { cFolders, cMode, cOpts, cExcl, cSched, cEvt, cPro }) { c.SetBounds(pad, y, Math.Max(Theme.P(300), W), c.Height); y += c.Height + gap; }
+                    bottom = y;
+                }
+                content.Size = new Size(cw, bottom + Theme.P(8));
+                scroll.PerformLayout(); // Bildlaufbereich gleich an die neue Höhe anpassen (auch kleiner)
             }
-            else
-            {
-                int y = top;
-                foreach (Card c in new Card[] { cFolders, cMode, cOpts, cExcl, cSched, cEvt, cPro }) { c.SetBounds(pad, y, Math.Max(Theme.P(300), W), c.Height); y += c.Height + gap; }
-                scroll.AutoScrollMinSize = new Size(0, y - y0 + Theme.P(8));
-            }
+            finally { laying = false; }
         }
 
         void UpdateModeDependent()
@@ -1517,6 +1540,7 @@ namespace SyncPilot
             j.UseRecycleBin = tRecycle.Checked;
             j.IncludeHidden = tHidden.Checked;
             j.CompareContent = tContent.Checked;
+            j.CompareOnConflict = tContentConflict.Checked;
             j.IgnoreDstOffset = tDst.Checked;
             j.IncludeSubdirs = tSubdirs.Checked;
             j.CopyRights = tRights.Checked;

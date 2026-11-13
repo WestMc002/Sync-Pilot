@@ -156,7 +156,10 @@ namespace SyncPilot
         /// gerade laufender Abgleich nach Zeitplan), ersetzt EXE und Liesmich und startet das Programm neu.
         /// Danach muss der Aufrufer das Programm beenden.
         /// </summary>
-        public static async Task Install(ReleaseInfo release, Action<int> progress)
+        public static Task Install(ReleaseInfo release, Action<int> progress) { return Install(release, progress, false); }
+
+        /// <param name="tray">nach dem Update wieder unsichtbar im Infobereich starten (automatisches Update im Hintergrund)</param>
+        public static async Task Install(ReleaseInfo release, Action<int> progress, bool tray)
         {
             if (string.IsNullOrEmpty(release.ZipUrl)) throw new Exception("Im Release ist keine ZIP-Datei angehängt.");
             string blocker = InstallBlocker();
@@ -178,7 +181,7 @@ namespace SyncPilot
             string target = Path.GetDirectoryName(exe);
             ProcessStartInfo start = new ProcessStartInfo("powershell.exe",
                 "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + script + "\" -ProcessId " + Process.GetCurrentProcess().Id +
-                " -Zip \"" + zip + "\" -Exe \"" + exe + "\" -Version \"" + release.Version + "\"");
+                " -Zip \"" + zip + "\" -Exe \"" + exe + "\" -Version \"" + release.Version + "\"" + (tray ? " -Tray" : ""));
             start.UseShellExecute = true;
             start.WindowStyle = ProcessWindowStyle.Hidden;
             // Programmordner ohne Schreibrechte (z. B. unter Programme): Hilfsskript mit Administratorrechten starten
@@ -201,7 +204,7 @@ namespace SyncPilot
         // Wartet auf das Ende dieser Oberfläche und aller anderen Sync-Pilot-Prozesse mit derselben EXE
         // (z. B. ein Abgleich nach Zeitplan, höchstens 30 Minuten), damit die EXE nicht gesperrt ist.
         const string Script = @"# Sync Pilot – Update (wird vom Programm erzeugt)
-param([int]$ProcessId,[string]$Zip,[string]$Exe,[string]$Version)
+param([int]$ProcessId,[string]$Zip,[string]$Exe,[string]$Version,[switch]$Tray)
 $ErrorActionPreference = 'Stop'
 $log = Join-Path $PSScriptRoot 'Update.log'
 $name = Split-Path $Exe -Leaf
@@ -236,7 +239,7 @@ try {
 } catch {
   ('FEHLER ' + $_.Exception.Message) | Out-File $log -Encoding utf8
 }
-Start-Process -FilePath $Exe -ArgumentList '--nach-update'
+if ($Tray) { Start-Process -FilePath $Exe -ArgumentList '--nach-update','/tray' } else { Start-Process -FilePath $Exe -ArgumentList '--nach-update' }
 ";
     }
 
@@ -260,6 +263,8 @@ Start-Process -FilePath $Exe -ArgumentList '--nach-update'
         public Action<bool> SetAuto;
         public Func<Task<UpdateStatus>> CheckNow;
         public Func<bool> CanInstall;
+        public Func<bool> AutoInstall;
+        public Action<bool> SetAutoInstall;
         public Action Install;
         public Action OpenPage;
     }

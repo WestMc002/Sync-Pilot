@@ -670,6 +670,7 @@ namespace SyncPilot
                     an.All.Add(it);
                 }
 
+                ResolveSameContent(job, an.All, sa, sb);
                 ApplyConflictRule(job, an.All);
                 ApplyNeverDelete(job, an.All);
                 FixDirDeletes(an.All);
@@ -741,7 +742,7 @@ namespace SyncPilot
         /// Wurde auf einer Seite ein Ordner bzw. eine Datei umbenannt oder verschoben, sieht der Abgleich zunächst
         /// "alter Pfad gelöscht" und "neuer Pfad neu". Passt der Inhalt zusammen, wird daraus ein Umbenennen auf der
         /// anderen Seite – ohne Dateien neu zu übertragen. Nur eindeutige Fälle; sonst bleibt es bei Löschen und Kopieren.
-        /// Mit "Inhalt vergleichen" wird jede Zuordnung zusätzlich am Inhalt geprüft.
+        /// Mit "Inhalt immer vergleichen" wird jede Zuordnung zusätzlich am Inhalt geprüft.
         /// </summary>
         static void DetectRenames(SyncJob job, List<PlanItem> all, IFileSide sa, IFileSide sb)
         {
@@ -858,7 +859,7 @@ namespace SyncPilot
                 Side(x, s) != null && Side(x, t) == null));
             if (gone.Count == 0 || added.Count == 0) return;
 
-            // "Inhalt vergleichen": Zuordnung zusätzlich am Inhalt bestätigen (alter Pfad auf der Zielseite, neuer auf der Quellseite)
+            // "Inhalt immer vergleichen": Zuordnung zusätzlich am Inhalt bestätigen (alter Pfad auf der Zielseite, neuer auf der Quellseite)
             Func<PlanItem, PlanItem, bool> sameContent = null;
             if (job.CompareContent)
             {
@@ -1150,6 +1151,24 @@ namespace SyncPilot
                         else Set(it, ActionKind.NachA, "Neuer Ordner in B");
                     }
                     break;
+            }
+        }
+
+        /// <summary>
+        /// "Inhalt nur bei Konflikten vergleichen": Konflikte mit Datei auf beiden Seiten und gleicher Größe am Inhalt prüfen.
+        /// Gleicher Inhalt (nur das Datum ist verschieden) ist kein Konflikt. Ohne Wirkung, wenn ohnehin immer verglichen wird.
+        /// </summary>
+        static void ResolveSameContent(SyncJob job, List<PlanItem> all, IFileSide sa, IFileSide sb)
+        {
+            if (!job.CompareOnConflict || job.CompareContent) return;
+            foreach (PlanItem it in all)
+            {
+                if (it.Proposed != ActionKind.Konflikt || it.Unreadable || it.A == null || it.B == null) continue;
+                if (it.A.IsDir || it.B.IsDir || it.A.Size != it.B.Size) continue;
+                bool same;
+                try { same = ContentEqual(sa, sb, it.Rel); }
+                catch { continue; } // nicht lesbar: Konflikt bleibt
+                if (same) Set(it, ActionKind.Keine, it.Reason + " – Inhalt gleich");
             }
         }
 

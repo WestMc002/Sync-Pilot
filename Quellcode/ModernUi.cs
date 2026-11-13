@@ -297,6 +297,8 @@ namespace SyncPilot
             demo.SetAuto = delegate (bool on) { };
             demo.CheckNow = delegate { return Task.FromResult(MainForm.DemoUpdateStatus); };
             demo.CanInstall = delegate { return false; };
+            demo.AutoInstall = delegate { return false; }; // Standard: aus
+            demo.SetAutoInstall = delegate (bool on) { };
             return new AboutDialog(null, demo);
         }
 
@@ -355,7 +357,7 @@ namespace SyncPilot
             if (updates != null)
             {
                 // Zeile „Updates“ im selben Raster wie die Zeilen darüber, darunter „Automatisch prüfen“
-                card.Height += S(49) + S(32);
+                card.Height += S(49) + S(32) + (updates.AutoInstall != null ? S(32) : 0);
                 AddUpdateRows(card, S(18) + 4 * S(26), updates);
             }
             Controls.Add(card);
@@ -606,6 +608,42 @@ namespace SyncPilot
             autoText.Click += delegate { auto.Checked = !auto.Checked; };
             card.Controls.Add(autoText);
 
+            // Automatisch aktualisieren: Zeile darunter; nur zusammen mit „Automatisch prüfen“ möglich
+            ToggleSwitch autoInst = null;
+            Label autoInstText = null;
+            if (updates.AutoInstall != null)
+            {
+                int iy = ay + S(32);
+                autoInst = new ToggleSwitch();
+                autoInst.Checked = updates.AutoInstall();
+                autoInst.AccessibleName = "Automatisch aktualisieren";
+                autoInst.BackColor = Theme.Surface;
+                autoInst.Location = new Point(right - S(2) - autoInst.Width, iy + (S(32) - autoInst.Height) / 2);
+                autoInst.CheckedChanged += delegate { if (updates.SetAutoInstall != null) updates.SetAutoInstall(autoInst.Checked); };
+                card.Controls.Add(autoInst);
+                autoInstText = new Label();
+                autoInstText.Text = "Automatisch aktualisieren";
+                autoInstText.BackColor = Theme.Surface;
+                autoInstText.TextAlign = ContentAlignment.MiddleLeft;
+                autoInstText.AutoEllipsis = true;
+                autoInstText.Cursor = Cursors.Hand;
+                autoInstText.Bounds = new Rectangle(x0, iy, Math.Max(10, autoInst.Left - S(8) - x0), S(32));
+                autoInstText.Click += delegate { if (autoInst.Enabled) autoInst.Checked = !autoInst.Checked; };
+                card.Controls.Add(autoInstText);
+                const string instTip = "Eine neue Version ohne Rückfrage installieren, sobald kein Abgleich läuft. " +
+                    "Sync Pilot startet danach von selbst neu (im Infobereich, wenn das Fenster vorher zu war).";
+                tip.SetToolTip(autoInst, instTip);
+                tip.SetToolTip(autoInstText, instTip);
+                ToggleSwitch ai = autoInst; Label at = autoInstText;
+                Action sync = delegate
+                {
+                    ai.Enabled = auto.Checked;
+                    at.ForeColor = auto.Checked ? Theme.Text : Theme.TextDim;
+                };
+                auto.CheckedChanged += delegate { sync(); };
+                sync();
+            }
+
             // Details auf-/zuklappen: „Automatisch prüfen“, die Karte, alles darunter und das Fenster rücken um die Feldhöhe
             bool expanded = false;
             int grown = 0;
@@ -629,6 +667,7 @@ namespace SyncPilot
                 more.Width = TextRenderer.MeasureText(more.Text, more.Font).Width + S(2);
                 auto.Top += d;
                 autoText.Top += d;
+                if (autoInst != null) { autoInst.Top += d; autoInstText.Top += d; }
                 card.Height += d;
                 foreach (Control c in Controls)
                     if (c != card && c.Top > card.Top) c.Top += d;
