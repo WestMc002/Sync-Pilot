@@ -771,7 +771,7 @@ namespace SyncPilot
             get { return new UpdateStatus(UpdateKind.Current, "Aktuell", "Zuletzt geprüft " + DateTime.Now.ToString("dd.MM.yyyy")); }
         }
 
-        string updateError;
+        string updateError, updateErrorMore; // Kurzmeldung bzw. technischer Originaltext (für „Details“)
 
         UpdateStatus UpdateState()
         {
@@ -779,7 +779,13 @@ namespace SyncPilot
             DateTime lastCheck = AppSettings.Current.LastUpdateCheck;
             string last = lastCheck == DateTime.MinValue ? "" : "Zuletzt geprüft " + lastCheck.ToLocalTime().ToString("dd.MM.yyyy");
             if (available != null) return new UpdateStatus(UpdateKind.Available, "Version " + available.Version + " verfügbar", last);
-            if (updateError != null) return new UpdateStatus(UpdateKind.Failed, "Prüfung nicht möglich", updateError);
+            if (updateError == Updater.NoRelease) return new UpdateStatus(UpdateKind.Unknown, "Noch keine Version", "Nichts veröffentlicht.");
+            if (updateError != null)
+            {
+                UpdateStatus failed = new UpdateStatus(UpdateKind.Failed, "Prüfung nicht möglich", updateError);
+                failed.More = updateErrorMore;
+                return failed;
+            }
             if (lastCheck == DateTime.MinValue) return new UpdateStatus(UpdateKind.Unknown, "Noch nicht geprüft", "");
             return new UpdateStatus(UpdateKind.Current, "Aktuell", last);
         }
@@ -788,6 +794,19 @@ namespace SyncPilot
         bool updateRunning;
 
         // Ergebnis einer Prüfung von Hand nur im Info-Fenster; im Hauptfenster erscheint nur bei neuer Version etwas
+        /// <summary>
+        /// Fehler der Update-Prüfung aufteilen: feste Kurzmeldung (zweite Zeile im Info-Fenster) und technischer
+        /// Originaltext (hinter „Details“). Unbekannte Fehler: nur „Details“.
+        /// </summary>
+        public static void UpdateCheckError(Exception ex, out string brief, out string more)
+        {
+            more = ex.Data["Detail"] as string;
+            string msg = ex.Message ?? "";
+            if (msg == Updater.NoRelease || msg == "Antwort unlesbar." || more != null) { brief = msg; return; }
+            brief = ""; // unbekannt: kein doppeltes „Prüfung fehlgeschlagen.“, der Text steht unter „Details“
+            more = msg.Length > 0 ? msg : ex.GetType().Name;
+        }
+
         async Task<UpdateStatus> CheckForUpdates(bool manual)
         {
             if (Demo.Active || updateRunning) return UpdateState(); // Screenshots: keine Prüfung
@@ -798,6 +817,7 @@ namespace SyncPilot
             {
                 ReleaseInfo release = await Task.Run(() => Updater.GetLatest());
                 updateError = null;
+                updateErrorMore = null;
                 st.LastUpdateCheck = DateTime.UtcNow;
                 st.Save();
                 if (Updater.IsNewer(release.Version))
@@ -824,7 +844,7 @@ namespace SyncPilot
             catch (Exception ex)
             {
                 // automatisch: still (nur im Info-Fenster sichtbar); von Hand: Fehlermeldung im Info-Fenster
-                updateError = ex.Message;
+                UpdateCheckError(ex, out updateError, out updateErrorMore);
             }
             finally { updateRunning = false; }
             return UpdateState();

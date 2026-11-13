@@ -40,6 +40,17 @@ namespace SyncPilot
 
         static string UserAgent { get { return "Sync-Pilot/" + AppInfo.Version; } }
 
+        /// <summary>Kein Fehler: Auf GitHub ist noch keine Version veröffentlicht.</summary>
+        public const string NoRelease = "Noch keine Version";
+
+        /// <summary>Kurzmeldung für das Info-Fenster, technischer Originaltext in Data["Detail"] (für „Details“).</summary>
+        static Exception Brief(string brief, string detail)
+        {
+            Exception e = new Exception(brief);
+            if (!string.IsNullOrEmpty(detail)) e.Data["Detail"] = detail;
+            return e;
+        }
+
         public static ReleaseInfo GetLatest()
         {
             PrepareTls();
@@ -58,15 +69,20 @@ namespace SyncPilot
             catch (WebException ex)
             {
                 HttpWebResponse http = ex.Response as HttpWebResponse;
-                if (http != null && http.StatusCode == HttpStatusCode.NotFound) throw new Exception("Auf GitHub ist noch keine Version veröffentlicht.");
-                if (http != null && (int)http.StatusCode == 403) throw new Exception("GitHub hat die Anfrage abgelehnt (zu viele Anfragen). Später erneut versuchen.");
-                throw new Exception("GitHub nicht erreichbar: " + ex.Message);
+                if (http != null && http.StatusCode == HttpStatusCode.NotFound) throw new Exception(NoRelease);
+                string brief = "Nicht erreichbar.";
+                if (http != null && (int)http.StatusCode == 403) brief = "Zu viele Anfragen.";
+                else if (ex.Status == WebExceptionStatus.NameResolutionFailure || ex.Status == WebExceptionStatus.ConnectFailure) brief = "Keine Verbindung.";
+                else if (ex.Status == WebExceptionStatus.Timeout) brief = "Keine Antwort.";
+                throw Brief(brief, ex.Message);
             }
             // Liste statt /releases/latest: „latest“ übergeht Vorabversionen (Pre-release). Genommen wird die
             // höchste Version, die kein Entwurf ist – Vorabversionen eingeschlossen.
             Dictionary<string, object> data = null;
             System.Version best = null;
-            object parsed = new JavaScriptSerializer().DeserializeObject(json);
+            object parsed;
+            try { parsed = new JavaScriptSerializer().DeserializeObject(json); }
+            catch (Exception ex) { throw Brief("Antwort unlesbar.", ex.Message); }
             if (parsed is System.Collections.IEnumerable)
             {
                 foreach (object o in (System.Collections.IEnumerable)parsed)
@@ -82,7 +98,7 @@ namespace SyncPilot
                     if (best == null || v > best) { best = v; data = r; }
                 }
             }
-            if (data == null) throw new Exception("Auf GitHub ist noch keine Version veröffentlicht.");
+            if (data == null) throw new Exception(NoRelease);
             ReleaseInfo info = new ReleaseInfo();
             info.PageUrl = ReleasesPage;
             object value;
@@ -102,7 +118,7 @@ namespace SyncPilot
                     }
                 }
             }
-            if (string.IsNullOrEmpty(info.Version)) throw new Exception("Antwort von GitHub ohne Versionsnummer.");
+            if (string.IsNullOrEmpty(info.Version)) throw new Exception("Antwort unlesbar.");
             return info;
         }
 
@@ -231,6 +247,8 @@ Start-Process -FilePath $Exe -ArgumentList '--nach-update'
     {
         public readonly UpdateKind Kind;
         public readonly string Title, Detail;
+        /// <summary>Technischer Originaltext zur zweiten Zeile (hinter „Details“), null = keiner.</summary>
+        public string More;
         public UpdateStatus(UpdateKind kind, string title, string detail) { Kind = kind; Title = title; Detail = detail ?? ""; }
     }
 
