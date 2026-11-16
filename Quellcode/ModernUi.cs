@@ -104,11 +104,14 @@ namespace SyncPilot
                 Size s1 = TextRenderer.MeasureText(g, Name1, f1, Size.Empty, flags);
                 Size s2 = TextRenderer.MeasureText(g, Name2, f2, Size.Empty, flags);
                 int tw = Math.Max(s1.Width, s2.Width);
-                int th = s1.Height + (int)(2 * k) + s2.Height;
+                // Zeilen überlappen um 3 × Skalierung: die NoPadding-Höhe enthält oben/unten Leerraum für Ober- und
+                // Unterlängen, sonst wirkt der Textblock höher als das Logo (Globale Richtlinien, Footer)
+                int gap = -(int)Math.Round(3 * k);
+                int th = s1.Height + gap + s2.Height;
                 int top = (Height - th) / 2;
                 int tx = right - tw;
                 TextRenderer.DrawText(g, Name1, f1, new Point(tx, top), Theme.Text, flags);
-                int y2 = top + s1.Height + (int)(2 * k);
+                int y2 = top + s1.Height + gap;
                 TextRenderer.DrawText(g, Name2, f2, new Point(tx, y2), _hover ? Theme.AccentSoftText : Theme.TextDim, flags);
                 _link = new Rectangle(tx, top, tw, th);
 
