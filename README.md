@@ -1,7 +1,5 @@
 # Sync Pilot
 
-> **Vorabversion** – Sync Pilot ist noch in Entwicklung. Bitte vor dem ersten Abgleich wichtiger Daten eine Sicherung anlegen und die Analyse (Vorschau) prüfen.
-
 Ordner abgleichen, sichern und spiegeln – lokal, im Netzwerk, per FTP und SFTP.
 Im Design von Windows 11 (hell und dunkel, mit der Windows-Akzentfarbe), mit Vorschau vor jedem Abgleich, Konfliktabfrage, Zeitplänen, Ereignis-Auslösern und Steuerung per Handy.
 
