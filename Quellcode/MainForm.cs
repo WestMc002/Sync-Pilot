@@ -786,7 +786,7 @@ namespace SyncPilot
             DateTime lastCheck = AppSettings.Current.LastUpdateCheck;
             string last = lastCheck == DateTime.MinValue ? "" : "Zuletzt geprüft " + lastCheck.ToLocalTime().ToString("dd.MM.yyyy");
             if (available != null) return new UpdateStatus(UpdateKind.Available, "Version " + available.Version + " verfügbar", last);
-            if (updateError == Updater.NoRelease) return new UpdateStatus(UpdateKind.Unknown, "Noch keine Version", "Nichts veröffentlicht.");
+            if (updateError == Updater.NoRelease) return new UpdateStatus(UpdateKind.Unknown, "Nur Vorabversionen", "Noch keine fertige Version.");
             if (updateError != null)
             {
                 UpdateStatus failed = new UpdateStatus(UpdateKind.Failed, "Prüfung nicht möglich", updateError);

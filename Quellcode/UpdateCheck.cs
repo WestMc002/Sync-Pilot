@@ -40,8 +40,8 @@ namespace SyncPilot
 
         static string UserAgent { get { return "Sync-Pilot/" + AppInfo.Version; } }
 
-        /// <summary>Kein Fehler: Auf GitHub ist noch keine Version veröffentlicht.</summary>
-        public const string NoRelease = "Noch keine Version";
+        /// <summary>Kein Fehler: /releases/latest liefert 404 – es gibt nur Vorabversionen (oder noch gar nichts).</summary>
+        public const string NoRelease = "Nur Vorabversionen";
 
         /// <summary>Kurzmeldung für das Info-Fenster, technischer Originaltext in Data["Detail"] (für „Details“).</summary>
         static Exception Brief(string brief, string detail)
@@ -54,7 +54,7 @@ namespace SyncPilot
         public static ReleaseInfo GetLatest()
         {
             PrepareTls();
-            HttpWebRequest request = (HttpWebRequest)WebRequest.Create("https://api.github.com/repos/" + Repository + "/releases?per_page=20");
+            HttpWebRequest request = (HttpWebRequest)WebRequest.Create("https://api.github.com/repos/" + Repository + "/releases/latest");
             request.UserAgent = UserAgent;
             request.Accept = "application/vnd.github+json";
             request.Timeout = 15000;
@@ -76,29 +76,11 @@ namespace SyncPilot
                 else if (ex.Status == WebExceptionStatus.Timeout) brief = "Keine Antwort.";
                 throw Brief(brief, ex.Message);
             }
-            // Liste statt /releases/latest: „latest“ übergeht Vorabversionen (Pre-release). Genommen wird die
-            // höchste Version, die kein Entwurf ist – Vorabversionen eingeschlossen.
-            Dictionary<string, object> data = null;
-            System.Version best = null;
-            object parsed;
-            try { parsed = new JavaScriptSerializer().DeserializeObject(json); }
+            // Standard der Globalen Richtlinien: /releases/latest (neuestes fertiges Release, ohne Vorab- und Entwurfsversionen)
+            Dictionary<string, object> data;
+            try { data = new JavaScriptSerializer().DeserializeObject(json) as Dictionary<string, object>; }
             catch (Exception ex) { throw Brief("Antwort unlesbar.", ex.Message); }
-            if (parsed is System.Collections.IEnumerable)
-            {
-                foreach (object o in (System.Collections.IEnumerable)parsed)
-                {
-                    Dictionary<string, object> r = o as Dictionary<string, object>;
-                    if (r == null) continue;
-                    object d;
-                    if (r.TryGetValue("draft", out d) && d is bool && (bool)d) continue;
-                    object t;
-                    if (!r.TryGetValue("tag_name", out t) || t == null) continue;
-                    System.Version v;
-                    if (!System.Version.TryParse(Convert.ToString(t).TrimStart('v', 'V'), out v)) continue;
-                    if (best == null || v > best) { best = v; data = r; }
-                }
-            }
-            if (data == null) throw new Exception(NoRelease);
+            if (data == null) throw new Exception("Antwort unlesbar.");
             ReleaseInfo info = new ReleaseInfo();
             info.PageUrl = ReleasesPage;
             object value;
