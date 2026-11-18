@@ -104,9 +104,10 @@ namespace SyncPilot
                 Size s1 = TextRenderer.MeasureText(g, Name1, f1, Size.Empty, flags);
                 Size s2 = TextRenderer.MeasureText(g, Name2, f2, Size.Empty, flags);
                 int tw = Math.Max(s1.Width, s2.Width);
-                // Zeilen überlappen um 3 × Skalierung: die NoPadding-Höhe enthält oben/unten Leerraum für Ober- und
-                // Unterlängen, sonst wirkt der Textblock höher als das Logo (Globale Richtlinien, Footer)
-                int gap = -(int)Math.Round(3 * k);
+                // Zeilen überlappen: die NoPadding-Höhe enthält oben/unten Leerraum für Ober- und Unterlängen, sonst wirkt
+                // der Textblock höher als das Logo. Abgestuft (Globale Richtlinien, Footer): 100 % 1 px, 125 % 2 px,
+                // ab 150 % 3 × Skalierung – bei kleiner Schrift wären 3 px zu viel
+                int gap = k >= 1.5 ? -(int)Math.Round(3 * k) : (k >= 1.25 ? -2 : -1);
                 int th = s1.Height + gap + s2.Height;
                 int top = (Height - th) / 2;
                 int tx = right - tw;
@@ -560,10 +561,11 @@ namespace SyncPilot
                 moreBox.Text = st.More ?? "";
                 if (!hasMore && expand != null) expand(false); // kein Detailtext mehr: Feld zuklappen
                 more.Visible = hasMore;
-                // „Details“ etwa ein Leerzeichen hinter dem Text (nicht hinter dem etwas breiteren Feld);
+                // „Details“ etwa ein Leerzeichen hinter dem Text (nicht hinter dem etwas breiteren Feld); + S(3), sonst
+                // überlappt „Details“ den Text (Globale Richtlinien, 17.11.2026);
                 // ohne Text bündig unter der Überschrift
                 int textEnd = hasDetail
-                    ? tx + Math.Min(TextRenderer.MeasureText(st.Detail, detail.Font, Size.Empty, TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix).Width - S(3), detail.Width)
+                    ? tx + Math.Min(TextRenderer.MeasureText(st.Detail, detail.Font, Size.Empty, TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix).Width + S(3), detail.Width)
                     : tx;
                 more.Bounds = new Rectangle(textEnd, dy, Math.Max(1, moreW), S(20));
                 more.BringToFront();
