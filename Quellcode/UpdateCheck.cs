@@ -292,10 +292,16 @@ if ($Tray) { Start-Process -FilePath $Exe -ArgumentList '--nach-update','/tray' 
         public UpdateBar()
         {
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-            BackColor = Theme.Bg;
             Height = Theme.P(56);
             foreach (FlatButton b in new FlatButton[] { Install, Page, Later }) Controls.Add(b);
         }
+
+        /// <summary>
+        /// Farbe der Leiste (nicht der Fensterhintergrund): Die Knöpfe malen ihren Rand in der Farbe des Elternelements –
+        /// sonst haben „Jetzt aktualisieren“ helle eckige Ecken und „Später“ ein weißes Rechteck auf der getönten Leiste.
+        /// </summary>
+        static Color Tint { get { return Theme.Blend(Theme.Bg, Theme.Accent, 0.14f); } }
+        public override Color BackColor { get { return Tint; } set { } }
 
         protected override void OnTextChanged(EventArgs e) { base.OnTextChanged(e); Invalidate(); }
 
@@ -318,7 +324,7 @@ if ($Tray) { Start-Process -FilePath $Exe -ArgumentList '--nach-update','/tray' 
             g.SmoothingMode = SmoothingMode.AntiAlias;
             Rectangle r = new Rectangle(0, 0, Width - 1, Height - 1);
             using (GraphicsPath path = Shapes.Rounded(r, Theme.P(8)))
-            using (SolidBrush brush = new SolidBrush(Theme.Blend(Theme.Bg, Theme.Accent, 0.14f)))
+            using (SolidBrush brush = new SolidBrush(Tint))
             using (Pen pen = new Pen(Theme.Blend(Theme.Bg, Theme.Accent, 0.45f)))
             {
                 g.FillPath(brush, path);
