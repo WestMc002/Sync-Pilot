@@ -99,7 +99,7 @@ namespace SyncPilot
                 "Fragt beim Speichern, ob Sync Pilot im Hintergrund und mit Windows laufen soll, solange das noch aus ist.");
             tAdmin = Row(cBack, 3, "Immer als Administrator starten",
                 (Elevation.IsAdmin ? "Läuft gerade als Administrator. " : "Läuft gerade ohne. ") +
-                "Windows fragt bei jedem Start nach; Ereignisse und Handy-Aufträge laufen dann ebenso.");
+                "Nur nötig für Admin-Aufgaben bei Ereignissen oder vom Handy. Windows fragt bei jedem Start nach.");
             tBackground.Checked = s.Background;
             tAutostart.Checked = s.Autostart;
             tAskBg.Checked = !s.NoAskBackground;
@@ -301,7 +301,28 @@ namespace SyncPilot
             tBackground.CheckedChanged += delegate { MarkDirty(); };
             tAutostart.CheckedChanged += delegate { MarkDirty(); };
             tAskBg.CheckedChanged += delegate { MarkDirty(); };
-            tAdmin.CheckedChanged += delegate { MarkDirty(); };
+            tAdmin.CheckedChanged += delegate
+            {
+                // Beim Einschalten kurz erklären: Meist reicht „Mit Administratorrechten ausführen“ je Aufgabe
+                if (!loading && tAdmin.Checked && !AppSettings.Current.AlwaysAdmin)
+                {
+                    DialogResult r = MessageBox.Show(FindForm(),
+                        "Damit läuft das ganze Programm mit Administratorrechten – auch der Handy-Zugang und alle Aufgaben samt Skripten.\n\n" +
+                        "Für einzelne Aufgaben reicht meist „Für Profis“ › „Mit Administratorrechten ausführen“: Nach Zeitplan laufen sie dann " +
+                        "ohne Rückfrage, beim Start von Hand fragt Windows nach.\n\n" +
+                        "Nötig ist diese Einstellung nur, wenn solche Aufgaben auch bei Ereignissen (Ordner überwachen, Auslöserdatei, " +
+                        "Laufwerk erreichbar) oder vom Handy mit Administratorrechten starten sollen.\n\n" +
+                        "Trotzdem immer als Administrator starten?",
+                        "Sync Pilot", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+                    if (r != DialogResult.Yes)
+                    {
+                        loading = true;
+                        tAdmin.Checked = false;
+                        loading = false;
+                    }
+                }
+                MarkDirty();
+            };
             tExplorer.CheckedChanged += delegate { MarkDirty(); };
             foreach (InputBox b in new InputBox[] { certFile, keyFile, certPass, certName })
                 b.Box.TextChanged += delegate { MarkDirty(); };

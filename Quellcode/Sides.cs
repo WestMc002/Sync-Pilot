@@ -8,6 +8,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 
 namespace SyncPilot
 {
@@ -55,6 +56,82 @@ namespace SyncPilot
             FtpData d = s as FtpData;
             if (d != null) d.Finish();
         }
+
+        static readonly char[] badNameChars = Path.GetInvalidFileNameChars(); // enthält \ / : * ? " < > | und Steuerzeichen
+
+        /// <summary>
+        /// Ist ein Name vom FTP-/SFTP-Server als einzelner Datei- bzw. Ordnername unter Windows gültig? Nein bei Trennzeichen,
+        /// Laufwerksangabe, „.“/„..“, Punkt oder Leerzeichen am Ende und Gerätenamen (CON, NUL, COM1 …). Solche Namen könnten
+        /// lokal sonst außerhalb des Sync-Ordners landen oder etwas anderes treffen als gemeint.
+        /// </summary>
+        public static bool ValidName(string name)
+        {
+            if (string.IsNullOrEmpty(name) || name == "." || name == "..") return false;
+            if (name.IndexOfAny(badNameChars) >= 0) return false;
+            char last = name[name.Length - 1];
+            if (last == '.' || last == ' ') return false;
+            string stem = name;
+            int dot = stem.IndexOf('.');
+            if (dot >= 0) stem = stem.Substring(0, dot);
+            stem = stem.TrimEnd(' ').ToUpperInvariant();
+            switch (stem)
+            {
+                case "CON": case "PRN": case "AUX": case "NUL": case "CONIN$": case "CONOUT$":
+                    return false;
+            }
+            if (stem.Length == 4 && (stem.StartsWith("COM") || stem.StartsWith("LPT")) && stem[3] >= '0' && stem[3] <= '9') return false;
+            return true;
+        }
+
+        /// <summary>
+        /// Relativer Pfad innerhalb des Sync-Ordners? Letzte Absicherung vor jedem lokalen Zugriff: kein Laufwerk, kein
+        /// führender Trenner, kein „/“, keine Segmente „.“/„..“ oder leere Segmente.
+        /// </summary>
+        public static void CheckRel(string rel)
+        {
+            if (rel.Length == 0) return;
+            bool bad = rel.IndexOf('/') >= 0 || rel.IndexOf(':') >= 0 || rel[0] == '\\';
+            if (!bad)
+                foreach (string seg in rel.Split('\\'))
+                    if (seg.Length == 0 || seg == "." || seg == "..") { bad = true; break; }
+            if (bad) throw new SyncException("Ungültiger Pfad außerhalb des Sync-Ordners abgelehnt: " + rel);
+        }
+    }
+
+    /// <summary>Art eines Reparse Points (Verknüpfung, Bereitstellungspunkt, Cloud-Datei …) – nur für Dateien mit diesem Attribut.</summary>
+    static class Reparse
+    {
+        const uint IO_REPARSE_TAG_MOUNT_POINT = 0xA0000003, IO_REPARSE_TAG_SYMLINK = 0xA000000C;
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct FILE_ATTRIBUTE_TAG_INFO { public uint FileAttributes; public uint ReparseTag; }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        static extern IntPtr CreateFile(string name, uint access, uint share, IntPtr sec, uint disposition, uint flags, IntPtr template);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool GetFileInformationByHandleEx(IntPtr h, int infoClass, out FILE_ATTRIBUTE_TAG_INFO info, uint size);
+
+        [DllImport("kernel32.dll")]
+        static extern bool CloseHandle(IntPtr h);
+
+        /// <summary>
+        /// true bei symbolischen Links und Bereitstellungspunkten (auch Junctions): Ziel kann außerhalb des Sync-Ordners
+        /// liegen. Andere Reparse Points (OneDrive-/Cloud-Dateien, Deduplizierung) sind normale Dateien. Im Zweifel true.
+        /// </summary>
+        public static bool IsLink(string path)
+        {
+            // FILE_READ_ATTRIBUTES, alle teilen, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS
+            IntPtr h = CreateFile(path, 0x80, 7, IntPtr.Zero, 3, 0x00200000 | 0x02000000, IntPtr.Zero);
+            if (h == IntPtr.Zero || h == new IntPtr(-1)) return true;
+            try
+            {
+                FILE_ATTRIBUTE_TAG_INFO info;
+                if (!GetFileInformationByHandleEx(h, 9 /* FileAttributeTagInfo */, out info, (uint)Marshal.SizeOf(typeof(FILE_ATTRIBUTE_TAG_INFO)))) return true;
+                return info.ReparseTag == IO_REPARSE_TAG_SYMLINK || info.ReparseTag == IO_REPARSE_TAG_MOUNT_POINT;
+            }
+            finally { CloseHandle(h); }
+        }
     }
 
     // =====================================================================
@@ -73,7 +150,35 @@ namespace SyncPilot
         public bool IsRemote { get { return false; } }
         public bool HidesDotFiles { get { return false; } }
 
-        public string Full(string rel) { return rel.Length == 0 ? root : Path.Combine(root, rel); }
+        public string Full(string rel)
+        {
+            if (rel.Length == 0) return root;
+            Sides.CheckRel(rel); // nie außerhalb des Sync-Ordners zugreifen
+            string full = Path.Combine(root, rel);
+            if (Elevation.IsAdmin) CheckNoLinks(rel);
+            return full;
+        }
+
+        /// <summary>
+        /// Mit Administratorrechten vor jedem Zugriff: Kein Teil des Pfads unterhalb des Sync-Ordners darf (inzwischen) ein
+        /// symbolischer Link oder eine Junction sein – sonst könnte jemand, der im Sync-Ordner schreiben darf, nach dem
+        /// Scan einen Ordner austauschen und Zugriffe mit Administratorrechten umleiten. Cloud-Ordner (OneDrive) sind
+        /// keine Links und bleiben erlaubt.
+        /// </summary>
+        void CheckNoLinks(string rel)
+        {
+            string p = root;
+            foreach (string seg in rel.Split('\\'))
+            {
+                p = Path.Combine(p, seg);
+                FileAttributes at;
+                try { at = File.GetAttributes(p); }
+                catch (FileNotFoundException) { return; }      // Rest gibt es noch nicht (wird neu angelegt)
+                catch (DirectoryNotFoundException) { return; }
+                if ((at & FileAttributes.ReparsePoint) != 0 && Reparse.IsLink(p))
+                    throw new SyncException("Verknüpfung im Sync-Ordner abgelehnt (könnte Zugriffe mit Administratorrechten umleiten): " + p);
+            }
+        }
 
         public void CheckRoot()
         {
@@ -169,6 +274,13 @@ namespace SyncPilot
                     else
                     {
                         FileInfo f = (FileInfo)fi;
+                        // Symbolische Links auf Dateien nicht abgleichen: Schreiben/Löschen träfe sonst das Ziel, das außerhalb
+                        // des Sync-Ordners liegen kann (Cloud-Dateien wie OneDrive bleiben normale Dateien)
+                        if ((at & FileAttributes.ReparsePoint) != 0 && Reparse.IsLink(f.FullName))
+                        {
+                            unreadable.Add(r);
+                            continue;
+                        }
                         try { result[r] = new FileEntry { Rel = r, Size = f.Length, Mtime = f.LastWriteTimeUtc }; }
                         catch (Exception ex) { errors.Add("Nicht lesbar: " + f.FullName + " (" + ex.Message + ")"); unreadable.Add(r); }
                     }
@@ -206,15 +318,18 @@ namespace SyncPilot
             else
             {
                 // von FTP: erst in eine Hilfsdatei, damit bei Abbruch keine halbe Datei zurückbleibt
-                string tmp = dst + ".syncpilot-tmp";
+                // Zufälliger Name und CreateNew: eine schon vorhandene Datei bzw. Verknüpfung gleichen Namens wird nie überschrieben
+                string tmp = dst + "." + Guid.NewGuid().ToString("N").Substring(0, 8) + ".syncpilot-tmp";
                 try
                 {
                     using (Stream i = from.OpenRead(rel))
-                    using (FileStream o = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20))
+                    using (FileStream o = new FileStream(tmp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1 << 20))
                     {
                         i.CopyTo(o, 1 << 20);
                         Sides.Finish(i);
                     }
+                    // nach der (evtl. langen) Übertragung erneut prüfen, ob im Pfad inzwischen eine Verknüpfung steckt
+                    if (Elevation.IsAdmin) CheckNoLinks(rel);
                     if (File.Exists(dst)) File.Replace(tmp, dst, null);
                     else File.Move(tmp, dst);
                 }
@@ -432,9 +547,20 @@ namespace SyncPilot
                 {
                     string r = rel.Length == 0 ? fi.Name : rel + "\\" + fi.Name;
                     if (m.Excluded(r, fi.Name, fi.IsDir)) continue;
-                    if (fi.IsLink || fi.Name.IndexOf('\\') >= 0 || result.ContainsKey(r))
+                    if (!Sides.ValidName(fi.Name))
                     {
-                        // Verknüpfung, Sonderzeichen oder zwei Namen, die sich nur in Groß-/Kleinschreibung unterscheiden
+                        // Name mit Trennzeichen, Laufwerk, „..“ o. Ä.: nie übernehmen (könnte lokal außerhalb des Sync-Ordners landen).
+                        // Als nicht lesbar werten – auch ohne Punkt/Leerzeichen am Ende, wie Windows den Namen kürzen würde –,
+                        // damit eine gleichnamige Datei auf der anderen Seite nicht als gelöscht gilt
+                        unreadable.Add(r);
+                        string shortName = r.TrimEnd('.', ' ');
+                        if (shortName.Length > 0 && shortName != r && !shortName.EndsWith("\\")) unreadable.Add(shortName);
+                        errors.Add("Ungültiger Name vom Server übersprungen: " + Full(rel) + "/" + fi.Name);
+                        continue;
+                    }
+                    if (fi.IsLink || result.ContainsKey(r))
+                    {
+                        // Verknüpfung oder zwei Namen, die sich nur in Groß-/Kleinschreibung unterscheiden
                         unreadable.Add(r);
                         continue;
                     }
@@ -700,7 +826,18 @@ namespace SyncPilot
                     bool isDir = it.Attrs.IsDir;
                     if (m.Excluded(r, it.Name, isDir)) continue;
                     bool special = !(isDir || (it.Attrs.IsFile && it.Attrs.HasSize && it.Attrs.HasTime));
-                    if (special || it.Name.IndexOf('\\') >= 0 || result.ContainsKey(r))
+                    if (!Sides.ValidName(it.Name))
+                    {
+                        // Name mit Trennzeichen, Laufwerk, „..“ o. Ä.: nie übernehmen (könnte lokal außerhalb des Sync-Ordners landen).
+                        // Als nicht lesbar werten – auch ohne Punkt/Leerzeichen am Ende, wie Windows den Namen kürzen würde –,
+                        // damit eine gleichnamige Datei auf der anderen Seite nicht als gelöscht gilt
+                        unreadable.Add(r);
+                        string shortName = r.TrimEnd('.', ' ');
+                        if (shortName.Length > 0 && shortName != r && !shortName.EndsWith("\\")) unreadable.Add(shortName);
+                        errors.Add("Ungültiger Name vom Server übersprungen: " + Full(rel) + "/" + it.Name);
+                        continue;
+                    }
+                    if (special || result.ContainsKey(r))
                     {
                         // Verknüpfung, Gerätedatei, fehlende Angaben, Sonderzeichen oder Namen, die sich nur in Groß-/Kleinschreibung unterscheiden
                         unreadable.Add(r);

@@ -1595,11 +1595,25 @@ namespace SyncPilot
             else if (foldersChanged) StateStore.Reset(j.Id); // neues Ordnerpaar: neu anfangen, nicht nach verlorenem Stand fragen
             if (isNew) Main.Jobs.Add(j);
 
-            string err = Scheduler.Apply(j);
+            // Gespeichert vom Benutzer: Prüfwert für Läufe mit Administratorrechten gleich mitschreiben (JobSeal)
+            string err = Scheduler.Apply(j, true);
             Main.SaveJobs();
             if (err != null)
                 MessageBox.Show("Die Aufgabe wurde gespeichert, aber der Zeitplan konnte nicht eingerichtet werden:\n\n" + err,
                     "Sync Pilot", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            else
+            {
+                // Hinweis schon beim Speichern: Mit Administratorrechten laufen nur Skripte aus geschützten Ordnern
+                string unprotectedFile = JobSeal.Needed(j) ? JobSeal.UnprotectedScript(j) : null;
+                if (unprotectedFile != null)
+                    MessageBox.Show(JobSeal.UnprotectedMessage(unprotectedFile) + "\n\nBis dahin bricht die Aufgabe mit Administratorrechten mit diesem Hinweis ab.",
+                        "Sync Pilot", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                string sealErr = JobSeal.Ensure(j);
+                if (sealErr != null)
+                    MessageBox.Show("Die Aufgabe wurde gespeichert, aber nicht für Administratorrechte bestätigt:\n\n" + sealErr +
+                        "\n\nMit Administratorrechten läuft sie erst, wenn sie noch einmal gespeichert und bestätigt wurde.",
+                        "Sync Pilot", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
             // Ereignisse brauchen das laufende Programm: anbieten, im Infobereich weiterzulaufen und mit Windows zu starten
             AppSettings st = AppSettings.Current;
             if (j.HasEvents && !j.Disabled && !Demo.Active && !st.NoAskBackground && (!st.Background || !st.Autostart))

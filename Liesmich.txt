@@ -113,6 +113,7 @@ Ordner angeben
   ftp://server.de/pfad              FTP (unverschlüsselt)
   ftps://server.de:21/pfad          FTPS mit explizitem TLS (AUTH TLS)
   ftpsim://server.de:990/pfad       FTPS mit implizitem TLS
+                                    (FTPS mindestens TLS 1.2)
   sftp://server.de:22/pfad          SFTP (über SSH)
   Der Pfad gilt ab dem Startordner nach der Anmeldung (wie bei den meisten
   FTP-Programmen); mit zwei Schrägstrichen (ftp://server.de//var/www) ab der
@@ -120,6 +121,10 @@ Ordner angeben
   FTP-Servern wird endgültig gelöscht (kein Papierkorb). Server mit MLSD
   liefern sekundengenaue Zeiten; ältere Server ohne MLSD nur grobe Zeiten -
   dort gilt beim ersten Abgleich gleiche Größe als gleich.
+  Namen vom Server, die unter Windows nicht gültig sind (z. B. mit / \ : * ?
+  " < > |, ".." oder Gerätenamen wie CON), werden übersprungen und im
+  Protokoll gemeldet; eine gleichnamige Datei auf der anderen Seite gilt
+  dann nicht als gelöscht.
   SFTP: Benutzer und Kennwort unter "Anmeldung" eintragen und einmal
   "Verbindung prüfen" klicken - dabei wird der Schlüssel des Servers
   (Fingerabdruck SHA256:...) bestätigt und gespeichert. Ändert er sich später,
@@ -178,6 +183,9 @@ Optionen
   Papierkorb).
   Sommerzeit-Versatz ignorieren (Standard): gleiche Größe und genau 1 Stunde
   Zeitunterschied gilt als gleich (FAT-Laufwerke, USB-Sticks, manche NAS).
+  Symbolische Links und Junctions im Sync-Ordner werden nie abgeglichen (ihr
+  Ziel kann außerhalb des Ordners liegen); Cloud-Dateien (z. B. OneDrive)
+  gelten als normale Dateien.
   NTFS-Rechte übertragen: ausdrücklich gesetzte Zugriffsrechte und der
   Vererbungsschutz werden mitkopiert (nur zwischen Windows-Laufwerken und
   -Freigaben). Klappt das nicht, steht eine Warnung im Protokoll.
@@ -340,6 +348,31 @@ Administratorrechte
   Als Administrator sind verbundene Netzlaufwerke (z. B. Z:) oft nicht
   sichtbar – dann \\Server\Freigabe verwenden. /run aus einem eigenen Skript
   läuft mit den Rechten dieses Skripts.
+  Schutz vor Änderungen von außen: Die Aufgaben liegen in einem Ordner, den
+  jedes Programm unter dem eigenen Konto ändern kann. Damit darüber niemand
+  zu Administratorrechten kommt, legt Sync Pilot beim Speichern einen
+  Prüfwert über alle Einstellungen, die bestimmen, was gelesen, geschrieben,
+  gelöscht oder ausgeführt wird (auch Zertifikat bzw. Hostschlüssel der
+  Gegenstelle und der Inhalt aufgerufener Skriptdateien), ab, den nur
+  Administratoren ändern können (Windows fragt dabei nach). Mit
+  Administratorrechten läuft eine Aufgabe nur, wenn der Prüfwert passt -
+  egal ob nach Zeitplan, von Hand, vom Handy oder bei Ereignissen. Passt er
+  nicht (Aufgabe außerhalb von Sync Pilot geändert bzw. noch nie bestätigt),
+  bricht der Lauf mit einem Hinweis ab, und beim nächsten Start fragt Sync
+  Pilot, ob die Aufgaben bestätigt werden sollen. Bei Änderungen von außen
+  die Aufgabe vorher öffnen und prüfen. Wer eine Skriptdatei selbst ändert,
+  bestätigt danach einfach neu.
+  Mit Administratorrechten startet Sync Pilot Skripte und Programme nur aus
+  geschützten Ordnern (Besitzer und Schreibrecht nur Administratoren bzw.
+  SYSTEM, z. B. unter "Programme" oder Windows). Ein selbst angelegter Ordner
+  wie C:\Skripte erbt meist "Authentifizierte Benutzer: Ändern" - dann bricht
+  die Aufgabe mit einem Hinweis ab. Schützen (Eingabeaufforderung als
+  Administrator):
+    icacls "C:\Skripte" /setowner *S-1-5-32-544 /T
+    icacls "C:\Skripte" /inheritance:r /grant:r *S-1-5-32-544:(OI)(CI)F
+           *S-1-5-18:(OI)(CI)F *S-1-5-11:(OI)(CI)RX   (eine Zeile)
+  Dasselbe gilt für Sync Pilot selbst bei Aufgaben "Als Administrator
+  ausführen": am besten unter "Programme" installieren.
 
 Aufgabe deaktivieren
   In der Aufgabe "Aufgabe aktiv" ausschalten oder per Rechtsklick auf die
@@ -427,7 +460,15 @@ Updates
     im Projektordner). Das Ergebnis einer Prüfung von Hand steht nur dort.
   - Gibt es eine neuere Version, erscheint oben im Fenster ein Hinweis:
     "Jetzt aktualisieren" lädt das ZIP, beendet Sync Pilot, ersetzt EXE und
-    Liesmich und startet das Programm neu. Aufgaben, Einstellungen, Stand und
+    Liesmich und startet das Programm neu. Installiert werden nur signierte
+    Updates: Neben dem ZIP liegt ein Manifest mit der Prüfsumme (SHA-256),
+    signiert mit dem Schlüssel des Herausgebers. Fehlt die Signatur oder passt
+    sie nicht, zeigt das Info-Fenster "Nicht signiert." bzw. "Signatur
+    ungültig." und bietet nur die Release-Seite an. Aus dem ZIP werden nur EXE
+    und Liesmich übernommen. Unter "Programme" läuft das Update mit
+    Administratorrechten in einem geschützten Ordner; Sync Pilot startet danach
+    mit normalen Rechten neu (mit "Immer als Administrator starten" wieder als
+    Administrator). Aufgaben, Einstellungen, Stand und
     Verlauf (%LOCALAPPDATA%\Sync Pilot) bleiben erhalten. Läuft gerade ein
     Abgleich nach Zeitplan, wartet das Update, bis er fertig ist. Schlägt das
     Ersetzen fehl, bleibt die bisherige Version und Sync Pilot meldet es.

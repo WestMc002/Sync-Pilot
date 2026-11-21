@@ -182,6 +182,8 @@ namespace SyncPilot
 
         /// <summary>Beim Einlesen umgestellter Zeitplan: muss in der Aufgabenplanung neu eingerichtet werden.</summary>
         [XmlIgnore] public bool NeedsReapply;
+        /// <summary>Kopie mit aufgelösten Pfaden (Engine.Prepare): Prüfwert wurde schon an der Originalaufgabe geprüft.</summary>
+        [XmlIgnore] public bool Prepared;
 
         public SyncJob()
         {

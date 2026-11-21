@@ -181,7 +181,7 @@ namespace SyncPilot
     public sealed class FtpClient : IDisposable
     {
         const int Timeout = 60000;
-        const SslProtocols Protocols = (SslProtocols)(3072 | 768 | 192); // TLS 1.2, 1.1, 1.0
+        const SslProtocols Protocols = (SslProtocols)3072; // nur TLS 1.2 (1.0/1.1 gelten als unsicher)
 
         readonly FtpUrl url;
         readonly string user, pass, trusted;

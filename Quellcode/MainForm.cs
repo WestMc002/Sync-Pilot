@@ -617,12 +617,57 @@ namespace SyncPilot
             Theme.ApplyTitleBar(this);
         }
 
+        /// <summary>
+        /// Beim Start: Aufgaben, die mit Administratorrechten laufen können, aber keinen passenden Prüfwert haben (noch nie
+        /// bestätigt, z. B. nach dem Update, oder außerhalb von Sync Pilot geändert). Sie laufen mit Administratorrechten erst
+        /// nach der Bestätigung. Einmal je Start fragen; bei Änderungen von außen warnen, Vorauswahl „Nein“.
+        /// </summary>
+        void CheckSeals()
+        {
+            if (Demo.Active || Jobs == null) return;
+            List<SyncJob> fresh = new List<SyncJob>(), changed = new List<SyncJob>();
+            foreach (SyncJob j in Jobs)
+            {
+                if (!JobSeal.Needed(j) || JobSeal.Valid(j)) continue;
+                if (JobSeal.Stored(j.Id) == null) fresh.Add(j); else changed.Add(j);
+            }
+            if (fresh.Count == 0 && changed.Count == 0) return;
+            StringBuilder t = new StringBuilder();
+            if (changed.Count > 0)
+            {
+                t.Append("Diese Aufgaben oder ihre Skriptdateien wurden seit der letzten Bestätigung geändert:\n");
+                foreach (SyncJob j in changed) t.Append("  \u2022 " + j.Name + "\n");
+                t.Append("\nHast du das nicht selbst getan, kann es ein anderes Programm gewesen sein. Mit Administratorrechten laufen sie " +
+                         "erst wieder, wenn du sie bestätigst. Bitte vorher öffnen und Ordner und Skripte prüfen.\n\n");
+            }
+            if (fresh.Count > 0)
+            {
+                t.Append(Elevation.IsAdmin && fresh.Count > 1
+                    ? "Sync Pilot läuft als Administrator. Damit Aufgaben so laufen dürfen, müssen sie einmal bestätigt werden – noch nicht bestätigt sind:\n"
+                    : "Diese Aufgaben können mit Administratorrechten laufen und sind dafür noch nicht bestätigt:\n");
+                // lange Listen kürzen, sonst wird das Fenster höher als der Bildschirm
+                for (int i = 0; i < fresh.Count && i < 12; i++) t.Append("  \u2022 " + fresh[i].Name + "\n");
+                if (fresh.Count > 12) t.Append("  \u2026 und " + (fresh.Count - 12) + " weitere\n");
+                t.Append("\n");
+            }
+            t.Append("Jetzt bestätigen?");
+            bool warn = changed.Count > 0;
+            if (MessageBox.Show(this, t.ToString(), "Sync Pilot", MessageBoxButtons.YesNo,
+                    warn ? MessageBoxIcon.Warning : MessageBoxIcon.Question,
+                    warn ? MessageBoxDefaultButton.Button2 : MessageBoxDefaultButton.Button1) != DialogResult.Yes) return;
+            List<SyncJob> all = new List<SyncJob>(fresh);
+            all.AddRange(changed);
+            string err = JobSeal.Save(all);
+            if (err != null) MessageBox.Show(this, "Die Bestätigung konnte nicht gespeichert werden:\n\n" + err, "Sync Pilot", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+
         protected override void OnShown(EventArgs e)
         {
             base.OnShown(e);
             BeginInvoke(new Action(CheckExplorer));
             BeginInvoke(new Action(CheckPendingSync));
             BeginInvoke(new Action(ShowUpdateResult));
+            BeginInvoke(new Action(CheckSeals));
             LayoutNav();
         }
 
@@ -785,7 +830,17 @@ namespace SyncPilot
             if (Demo.Active) return DemoUpdateStatus;
             DateTime lastCheck = AppSettings.Current.LastUpdateCheck;
             string last = lastCheck == DateTime.MinValue ? "" : "Zuletzt geprüft " + lastCheck.ToLocalTime().ToString("dd.MM.yyyy");
-            if (available != null) return new UpdateStatus(UpdateKind.Available, "Version " + available.Version + " verfügbar", last);
+            if (available != null)
+            {
+                if (available.Problem != null)
+                {
+                    // neue Version da, aber nicht (gültig) signiert bzw. ohne passendes ZIP: wird nicht installiert
+                    UpdateStatus unsigned = new UpdateStatus(UpdateKind.Available, "Version " + available.Version + " verfügbar", available.Problem);
+                    unsigned.More = available.ProblemDetail;
+                    return unsigned;
+                }
+                return new UpdateStatus(UpdateKind.Available, "Version " + available.Version + " verfügbar", last);
+            }
             if (updateError == Updater.NoRelease) return new UpdateStatus(UpdateKind.Unknown, "Nur Vorabversionen", "Noch keine fertige Version.");
             if (updateError != null)
             {
@@ -975,6 +1030,21 @@ namespace SyncPilot
         async Task InstallUpdate(bool automatic)
         {
             if (updating || available == null) return;
+            if (Updater.Busy)
+            {
+                if (!automatic) MessageBox.Show(this, Updater.Running, "Update", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            // nicht (gültig) signiert oder ohne passendes ZIP: nur die Release-Seite anbieten, automatisch nie installieren
+            if (available.Problem != null || string.IsNullOrEmpty(available.ZipUrl))
+            {
+                if (automatic) return;
+                if (MessageBox.Show(this, "Sync Pilot installiert dieses Update nicht: " + (available.Problem ?? Updater.NoZip) +
+                        (string.IsNullOrEmpty(available.ProblemDetail) ? "" : "\n\n" + available.ProblemDetail) + "\n\nRelease-Seite auf GitHub öffnen?",
+                        "Update", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
+                    OpenReleasePage();
+                return;
+            }
             if ((current != null && current.Busy) || RemoteRun.SomeBusy || Triggers.SomeBusy)
             {
                 if (automatic) { TryAutoUpdate(); return; }
@@ -1014,7 +1084,8 @@ namespace SyncPilot
                     foreach (FlatButton b in new FlatButton[] { updateBar.Install, updateBar.Page, updateBar.Later }) b.Enabled = true;
                     return;
                 }
-                MessageBox.Show(this, ex.Message, "Update", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                string detail = ex.Data["Detail"] as string;
+                MessageBox.Show(this, ex.Message + (detail != null ? "\n\n" + detail : ""), "Update", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 updateBar.Text = text;
                 foreach (FlatButton b in new FlatButton[] { updateBar.Page, updateBar.Later }) b.Enabled = true;
                 updateBar.Install.Enabled = true;

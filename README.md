@@ -60,6 +60,7 @@ Die Version (Haupt.Neben.Jahr.MonatTag) wird dabei automatisch hochgezählt, die
 | `Quellcode\` | C#-Quelldateien (WinForms, .NET Framework 4) und `app.manifest` |
 | `Resources\` | Icon, GS-Logo, Beispieldaten `Demo.xml` für die Screenshots und die Handy-Webseite `Web\` (werden in die EXE eingebettet) |
 | `Screenshots\` | Bilder für diese Seite, hell und dunkel (erzeugt die `Erstellen.bat`) |
+| `Release\` | Release-Paket der aktuellen Version: ZIP und signiertes Manifest (erzeugt und signiert die `Erstellen.bat` beim Herausgeber) |
 | `Erstellen.bat` | Build-Skript |
 | `Liesmich.txt` | Ausführliche Beschreibung und Versionsgeschichte |
 

@@ -1,6 +1,10 @@
 name: Release
 
-# Release v<Version> mit "Sync-Pilot-<Version>.zip" ("Sync Pilot.exe" + Liesmich.txt).
+# Release v<Version> aus dem signierten Release-Paket im Ordner Release: "Sync-Pilot-<Version>.zip"
+# ("Sync Pilot.exe" + Liesmich.txt) und "Sync-Pilot-<Version>.manifest" (signierte Pruefsumme).
+# Das Paket entsteht auf dem PC des Herausgebers (Erstellen.bat). Der Workflow baut nichts selbst:
+# Er prueft, dass ZIP und Manifest zur Version passen (Name, Version, SHA-256 - die Signatur prueft
+# erst Sync Pilot, der Schluessel ist nicht auf GitHub), und haengt beide an das Release.
 # Release-Seite: oben "Änderungen" (Punkte aus dem Commit-Text zur Version), darunter die Installation.
 # - Run workflow (Versionsnummer) oder Tag v<Version>: Release anlegen; gibt es es schon,
 #   wird nichts neu gebaut, nur der Release-Text aufgefrischt.
@@ -57,6 +61,8 @@ jobs:
 
       - name: Release-Texte erstellen
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()   # Umlaute aus git richtig lesen
           New-Item -ItemType Directory -Path 'notes' -Force | Out-Null
@@ -73,6 +79,14 @@ jobs:
             if ($env:VORABVERSION -eq 'true') {
               $head = @('> **Vorabversion** – Sync Pilot ist noch in Entwicklung. Bitte vor dem ersten Abgleich wichtiger Daten eine Sicherung anlegen und die Analyse (Vorschau) prüfen.', '')
             }
+            # Signatur-Hinweis nur bei signierten Releases (Manifest im Ordner Release bzw. schon angehängt)
+            $signed = Test-Path -LiteralPath "Release\Sync-Pilot-$ver.manifest"
+            if (-not $signed) {
+              $names = @(gh release view "v$ver" --repo "${{ github.repository }}" --json assets --jq '.assets[].name' 2>$null)
+              $signed = $names -contains "Sync-Pilot-$ver.manifest"
+            }
+            $sig = @()
+            if ($signed) { $sig = @("Signatur: ``Sync-Pilot-$ver.manifest`` ist die signierte Prüfsumme des ZIP. Sync Pilot installiert Updates nur, wenn diese Signatur gültig ist.", '') }
             $lines = $head + @('## Änderungen', '') + $items + @(
               '',
               '## Installation',
@@ -81,45 +95,37 @@ jobs:
               '2. `Sync Pilot.exe` starten und mit „Neue Aufgabe“ Ordner A und B wählen.',
               '3. Zuerst „Analysieren“ und die Vorschau prüfen, dann synchronisieren. Zeitplan und Ereignisse lassen sich je Aufgabe einstellen.',
               '',
-              'Voraussetzung: Windows 10 oder 11 mit .NET Framework 4.7.2 oder neuer. Ausführliche Beschreibung und Versionsgeschichte: `Liesmich.txt` im ZIP.'
-            )
+              'Voraussetzung: Windows 10 oder 11 mit .NET Framework 4.7.2 oder neuer. Ausführliche Beschreibung und Versionsgeschichte: `Liesmich.txt` im ZIP.',
+              ''
+            ) + $sig
             $lines | Set-Content -Path "notes\$ver.md" -Encoding utf8   # pwsh 7: UTF-8 ohne BOM
             Write-Host "---- $ver"; Get-Content "notes\$ver.md"
           }
 
-      - name: Kompilieren
+      - name: Release-Paket pruefen
         if: steps.ver.outputs.new != ''
         shell: pwsh
         run: |
           $ver = '${{ steps.ver.outputs.new }}'
-          @(
-            "[assembly: System.Reflection.AssemblyVersion(""$ver"")]"
-            "[assembly: System.Reflection.AssemblyFileVersion(""$ver"")]"
-            "[assembly: System.Reflection.AssemblyInformationalVersion(""$ver"")]"
-            "namespace SyncPilot { public static partial class AppInfo { public const string Version = ""$ver""; } }"
-          ) | Set-Content -Path 'Quellcode\VersionInfo.cs' -Encoding UTF8
-          $csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
-          if (-not (Test-Path $csc)) { $csc = "$env:WINDIR\Microsoft.NET\Framework\v4.0.30319\csc.exe" }
-          & $csc /nologo /target:winexe /optimize+ /codepage:65001 "/out:Sync Pilot.exe" `
-            "/win32icon:Resources\SyncPilot.ico" "/resource:Resources\SyncPilot.ico,SyncPilot.ico" `
-            "/resource:Resources\GS-Logo.png,GS-Logo.png" "/resource:Resources\Demo.xml,Demo.xml" `
-            "/resource:Resources\Web\index.html,web.index.html" "/resource:Resources\Web\app.js,web.app.js" "/resource:Resources\Web\app.css,web.app.css" `
-            /win32manifest:Quellcode\app.manifest `
-            /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll `
-            /r:System.Xml.dll /r:System.Security.dll /r:System.Web.Extensions.dll /r:System.Numerics.dll /r:Microsoft.CSharp.dll `
-            Quellcode\*.cs
-          if ($LASTEXITCODE -ne 0) { throw "Kompilieren fehlgeschlagen" }
-
-      - name: ZIP packen
-        if: steps.ver.outputs.new != ''
-        shell: pwsh
-        run: |
-          # GitHub ersetzt Leerzeichen in Dateinamen von Release-Anhängen durch Punkte -
-          # im ZIP bleibt der Originalname "Sync Pilot.exe" erhalten
-          $ver = '${{ steps.ver.outputs.new }}'
-          New-Item -ItemType Directory -Path 'paket' | Out-Null
-          Copy-Item 'Sync Pilot.exe', 'Liesmich.txt' -Destination 'paket'
-          Compress-Archive -Path 'paket\*' -DestinationPath "Sync-Pilot-$ver.zip"
+          $zip = "Release\Sync-Pilot-$ver.zip"
+          $man = "Release\Sync-Pilot-$ver.manifest"
+          if (-not (Test-Path -LiteralPath $zip)) { throw "Im Ordner Release fehlt $zip" }
+          if (-not (Test-Path -LiteralPath $man)) { throw "Im Ordner Release fehlt $man" }
+          $bytes = [IO.File]::ReadAllBytes($man)
+          if ([Array]::IndexOf($bytes, [byte]13) -ge 0) { throw 'Das Manifest enthaelt CR (Zeilenende muss LF sein, sonst passt die Signatur nicht)' }
+          $werte = @{}
+          foreach ($z in ([Text.Encoding]::UTF8.GetString($bytes) -split "`n")) { if ($z -match '^([A-Za-z0-9]+)=(.*)$') { $werte[$Matches[1]] = $Matches[2] } }
+          if ($werte['Programm'] -cne 'Sync Pilot') { throw "Manifest: Programm ist '$($werte['Programm'])'" }
+          if ($werte['Version'] -cne $ver) { throw "Manifest: Version ist '$($werte['Version'])', erwartet $ver" }
+          if ($werte['Datei'] -cne "Sync-Pilot-$ver.zip") { throw "Manifest: Datei ist '$($werte['Datei'])'" }
+          $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($werte['SHA256'] -cne $hash) { throw "Manifest: SHA256 passt nicht zum ZIP ($hash)" }
+          if (-not $werte['Signatur']) { throw 'Manifest: Signatur fehlt' }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $z = [IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $zip).Path)
+          try { $namen = @($z.Entries | ForEach-Object { $_.FullName }) } finally { $z.Dispose() }
+          if ($namen -notcontains 'Sync Pilot.exe') { throw 'Im ZIP fehlt Sync Pilot.exe' }
+          Write-Host "Release-Paket in Ordnung: $($namen -join ', ') - SHA256 $hash, Schluessel $($werte['Schluessel'])"
 
       - name: Release anlegen
         if: steps.ver.outputs.new != ''
@@ -130,7 +136,7 @@ jobs:
           $ver = '${{ steps.ver.outputs.new }}'
           $pre = @()
           if ($env:VORABVERSION -eq 'true') { $pre = @('--prerelease') }
-          gh release create "v$ver" "Sync-Pilot-$ver.zip" --repo "${{ github.repository }}" --title "Sync Pilot $ver" --notes-file "notes\$ver.md" @pre
+          gh release create "v$ver" "Release\Sync-Pilot-$ver.zip" "Release\Sync-Pilot-$ver.manifest" --repo "${{ github.repository }}" --title "Sync Pilot $ver" --notes-file "notes\$ver.md" @pre
           if ($LASTEXITCODE -ne 0) { throw "Release v$ver konnte nicht angelegt werden" }
 
       - name: Release-Texte auffrischen

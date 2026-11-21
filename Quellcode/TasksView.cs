@@ -654,10 +654,11 @@ namespace SyncPilot
             job.SwapSides();
             try { StateStore.Swap(job.Id); }
             catch { StateStore.Reset(job.Id); } // im Zweifel neu anfangen (erster Lauf löscht nichts)
-            string err = Scheduler.Apply(job);
+            string err = Scheduler.Apply(job, true); // vom Benutzer bestätigt: Prüfwert mitschreiben
             Main.SaveJobs();
+            if (err == null) err = JobSeal.Ensure(job);
             if (err != null)
-                MessageBox.Show("Getauscht, aber der Zeitplan konnte nicht aktualisiert werden:\n\n" + err, "Sync Pilot", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show("Getauscht, aber der Zeitplan bzw. die Bestätigung für Administratorrechte konnte nicht aktualisiert werden:\n\n" + err, "Sync Pilot", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             Main.ShowNotice("Quelle und Ziel von \u201e" + job.Name + "\u201c getauscht", true);
             BeginInvoke((MethodInvoker)delegate { Rebuild(); });
         }

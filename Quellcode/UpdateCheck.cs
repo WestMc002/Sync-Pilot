@@ -10,7 +10,10 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
@@ -20,17 +23,33 @@ namespace SyncPilot
     /// <summary>Neueste Veröffentlichung auf GitHub.</summary>
     public class ReleaseInfo
     {
+        /// <summary>ZipUrl ist nur gesetzt, wenn das Release gültig signiert ist (sonst nur die Release-Seite).</summary>
         public string Version, PageUrl, ZipUrl;
+        /// <summary>SHA-256 des ZIP aus dem signierten Manifest (Großbuchstaben).</summary>
+        public string Sha256;
+        /// <summary>Kurzmeldung, warum das Update nicht installiert wird (z. B. „Nicht signiert.“), sonst null.</summary>
+        public string Problem;
+        /// <summary>Ausführlicher Text zu Problem (für „Details“).</summary>
+        public string ProblemDetail;
+        /// <summary>Das geprüfte Manifest (Bytes wie auf GitHub); das Update-Skript prüft es selbst noch einmal.</summary>
+        public byte[] Manifest;
     }
 
-    /// <summary>Fragt nur die öffentliche GitHub-Schnittstelle ab (keine Anmeldung, es werden keine Daten übertragen).</summary>
+    /// <summary>
+    /// Update-Prüfung und Selbst-Update mit signierten Paketen (Globale Richtlinien › Updates, Vorlage: Dock Pilot).
+    /// Abgefragt wird nur die öffentliche GitHub-Schnittstelle ohne Anmeldung; übertragen wird nur die Programmversion im
+    /// User-Agent. Installiert wird nur ein Paket, dessen Manifest mit dem Schlüssel des Herausgebers signiert ist.
+    /// </summary>
     public static class Updater
     {
         public const string Repository = "WestMc002/Sync-Pilot";
         public const string ReleasesPage = "https://github.com/" + Repository + "/releases";
-        /// <summary>Arbeitsordner für Download und Hilfsskript.</summary>
+        /// <summary>Arbeitsordner (Temp des Benutzers) für Download und Ergebnis.</summary>
         public static string Folder { get { return Path.Combine(Path.GetTempPath(), "Sync Pilot-Update"); } }
         public static string LogFile { get { return Path.Combine(Folder, "Update.log"); } }
+
+        /// <summary>Diese Dateien übernimmt das Update aus dem ZIP – sonst nichts.</summary>
+        const string ExeName = "Sync Pilot.exe", ManualName = "Liesmich.txt";
 
         static void PrepareTls()
         {
@@ -43,6 +62,9 @@ namespace SyncPilot
         /// <summary>Kein Fehler: /releases/latest liefert 404 – es gibt nur Vorabversionen (oder noch gar nichts).</summary>
         public const string NoRelease = "Nur Vorabversionen";
 
+        /// <summary>Kein passendes ZIP im Release: dann nur die Release-Seite.</summary>
+        public const string NoZip = "Im Release ist keine passende ZIP-Datei.";
+
         /// <summary>Kurzmeldung für das Info-Fenster, technischer Originaltext in Data["Detail"] (für „Details“).</summary>
         static Exception Brief(string brief, string detail)
         {
@@ -50,6 +72,9 @@ namespace SyncPilot
             if (!string.IsNullOrEmpty(detail)) e.Data["Detail"] = detail;
             return e;
         }
+
+        public static string AssetName(string version) { return "Sync-Pilot-" + version + ".zip"; }
+        public static string ManifestName(string version) { return "Sync-Pilot-" + version + ".manifest"; }
 
         public static ReleaseInfo GetLatest()
         {
@@ -76,7 +101,7 @@ namespace SyncPilot
                 else if (ex.Status == WebExceptionStatus.Timeout) brief = "Keine Antwort.";
                 throw Brief(brief, ex.Message);
             }
-            // Standard der Globalen Richtlinien: /releases/latest (neuestes fertiges Release, ohne Vorab- und Entwurfsversionen)
+            // als JSON lesen (nicht per Suchmuster: der Release-Text könnte sonst Adressen vortäuschen)
             Dictionary<string, object> data;
             try { data = new JavaScriptSerializer().DeserializeObject(json) as Dictionary<string, object>; }
             catch (Exception ex) { throw Brief("Antwort unlesbar.", ex.Message); }
@@ -84,8 +109,20 @@ namespace SyncPilot
             ReleaseInfo info = new ReleaseInfo();
             info.PageUrl = ReleasesPage;
             object value;
-            if (data.TryGetValue("tag_name", out value) && value != null) info.Version = Convert.ToString(value).TrimStart('v', 'V');
-            if (data.TryGetValue("html_url", out value) && value != null) info.PageUrl = Convert.ToString(value);
+            string tag = data.TryGetValue("tag_name", out value) && value != null ? Convert.ToString(value).Trim() : "";
+            if (tag.StartsWith("v", StringComparison.OrdinalIgnoreCase)) tag = tag.Substring(1);
+            Version parsed;
+            if (tag.Length == 0 || !System.Version.TryParse(tag, out parsed)) throw new Exception("Antwort unlesbar.");
+            info.Version = tag;
+            if (data.TryGetValue("html_url", out value) && value != null)
+            {
+                string page = Convert.ToString(value);
+                if (page.StartsWith("https://github.com/" + Repository + "/releases/", StringComparison.OrdinalIgnoreCase)) info.PageUrl = page;
+            }
+            // ZIP und signiertes Manifest: nur mit genau diesen Namen und nur von der Download-Adresse dieses Repositorys
+            string wanted = AssetName(info.Version), wantedManifest = ManifestName(info.Version);
+            string prefix = "https://github.com/" + Repository + "/releases/download/";
+            string zipUrl = null, manifestUrl = null;
             // Listen kommen je nach Serializer als ArrayList oder object[] an
             if (data.TryGetValue("assets", out value) && value is System.Collections.IEnumerable && !(value is string))
             {
@@ -93,14 +130,45 @@ namespace SyncPilot
                 {
                     Dictionary<string, object> asset = item as Dictionary<string, object>;
                     if (asset == null || !asset.ContainsKey("name") || !asset.ContainsKey("browser_download_url")) continue;
-                    if (Convert.ToString(asset["name"]).EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
-                    {
-                        info.ZipUrl = Convert.ToString(asset["browser_download_url"]);
-                        break;
-                    }
+                    string name = Convert.ToString(asset["name"]);
+                    string url = Convert.ToString(asset["browser_download_url"]);
+                    if (url == null || !url.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (string.Equals(name, wanted, StringComparison.Ordinal)) zipUrl = url;
+                    else if (string.Equals(name, wantedManifest, StringComparison.Ordinal)) manifestUrl = url;
                 }
             }
-            if (string.IsNullOrEmpty(info.Version)) throw new Exception("Antwort unlesbar.");
+            if (zipUrl == null)
+            {
+                info.Problem = NoZip;
+                return info; // nur die Release-Seite
+            }
+            // Die Prüfsumme kommt nur aus dem signierten Manifest, nicht von GitHub: Wer das Release austauscht, kann ohne
+            // den privaten Schlüssel keine passende Signatur erzeugen.
+            if (manifestUrl == null)
+            {
+                info.Problem = "Nicht signiert.";
+                info.ProblemDetail = "Im Release fehlt die Signatur (" + wantedManifest + "). Sync Pilot installiert nur signierte Updates.";
+                return info;
+            }
+            byte[] manifest;
+            try { manifest = DownloadSmall(manifestUrl, 8192); }
+            catch (Exception ex)
+            {
+                info.Problem = "Signatur nicht lesbar.";
+                info.ProblemDetail = "Die Signatur konnte nicht geladen werden: " + ex.Message;
+                return info;
+            }
+            string sha, detail;
+            string problem = CheckManifest(manifest, info.Version, out sha, out detail);
+            if (problem != null)
+            {
+                info.Problem = problem;
+                info.ProblemDetail = detail;
+                return info;
+            }
+            info.ZipUrl = zipUrl;
+            info.Sha256 = sha;
+            info.Manifest = manifest;
             return info;
         }
 
@@ -111,6 +179,119 @@ namespace SyncPilot
             if (!System.Version.TryParse(remote, out a) || !System.Version.TryParse(AppInfo.Version, out b)) return false;
             return a > b;
         }
+
+        // ------------------------------------------------------------------ Signatur
+
+        // Öffentliche Schlüssel (RSA 3072) des Herausgebers: Haupt- und Reserveschlüssel (für alle eigenen Programme gleich).
+        // Signiert wird mit dem Hauptschlüssel; der Reserveschlüssel ersetzt ihn, falls er verloren geht.
+        const string MainKey = "<RSAKeyValue><Modulus>tLtylaHt5SgGCrTrEaM0H3Z/UqIQWSL2c3rCpuhZEYnCyJVDIYFCNuLbZ2OeapsJgCttOnwv5djvmpHTcGV6DeFM059O699xepTE0QWKYYM69sCFG4gunH2xh39bM20q9qWbui1Fyy+nN4cqzy26eR7tzXyClAJSS1zCKBuoF1uAtt2c1f1fcCHXdHsjWXZA6Z8OZeiIOizYSfiVHNIJFr8kSFQfnGRaygwp2ta27Hv0z0oKM6Zrvld/vXkgL2um7X1+GV24IzIVT7J8nxmar//yPoc6ugYhgcLjUMBgjwe/5m4REJQFWwntMF1uj5Jf+ehBFZS87kGtSvTykh7mea71JMdLpvAuhicMaP4T8Fr1uTYCPKR4cuiRI+6uogKVOZN23BuZS5iBj1zZkcmopNOXbQupsOkYp2QwejMHoEV7cEc71ZlRqqJed0vBqO8B5H21mrBGJm3kKHxa2QFzY5BZY7ZcC4EG2TZIkC8eZRNUXXmZOdAWGR+aPKeJg7DZ</Modulus><Exponent>AQAB</Exponent></RSAKeyValue>";
+        const string ReserveKey = "<RSAKeyValue><Modulus>zY/NkGbkd4IZHMMuGty2WLmQ0hm6lEZBql2v84BPf3NT+rpenfLK0kk7aKfRXgFS1G8tz+tHHd58GhioFFhnXN2syFTUus7u5csblitORGoNjTf9Rlicxw6Ut3hX7tkn2u+2PRKE5xOOL+epZV1YvBgr/W67WTt5RZEyfA0Vgn8llhrXaSD32iVNEzkeY5yy1bvQAmoxAk3KjNcD8Uuia9XP9qs/orDO0giIj/xsfY2D7qp/rkhSaIOnt/+gRWHbjhC/PGPga3dmcIMC1C3X0Z/meg6XgI+zWeXOOxFe8jCVRlaeGDoRJlJJGvg6uzIJlLCQeNxnSEufZCD10e+ex2xx75Gp3bqCvBvr49VXEC+pLxQteQMj2V5tuhq23MtIeSV0huaKZ1SPm1kxFjG5vj/11bo2VCkcx9dhfEBDdsucJqdUecbLJp58Y6smM2Ah4Qh7nILSNHHcpWey100qMN3WdwXsfzPVuRtD1c16KgC3TQIov2/2fGQGUxn1Awox</Modulus><Exponent>AQAB</Exponent></RSAKeyValue>";
+
+        static readonly string[] ManifestKeys = { "Programm", "Version", "Datei", "SHA256", "Schluessel", "Erstellt" };
+
+        /// <summary>
+        /// Manifest prüfen (UTF-8, LF, feste Reihenfolge, letzte Zeile „Signatur=“ mit RSA-SHA256/PKCS#1 v1.5 über alle
+        /// Bytes davor). Rückgabe: null = gültig (dann sha gesetzt), sonst Kurzmeldung; detail erklärt sie.
+        /// </summary>
+        public static string CheckManifest(byte[] data, string version, out string sha, out string detail)
+        {
+            sha = null;
+            detail = null;
+            const string Invalid = "Signatur ungültig.";
+            byte[] marker = Encoding.ASCII.GetBytes("\nSignatur=");
+            int at = IndexOf(data, marker);
+            if (at < 0) { detail = "Im Manifest fehlt die Zeile „Signatur=“."; return Invalid; }
+            byte[] signed = new byte[at + 1];
+            Array.Copy(data, signed, signed.Length);
+            byte[] signature;
+            try
+            {
+                string text = Encoding.ASCII.GetString(data, at + marker.Length, data.Length - at - marker.Length).Trim();
+                signature = Convert.FromBase64String(text);
+            }
+            catch { detail = "Die Signatur im Manifest ist nicht lesbar."; return Invalid; }
+            string[] lines;
+            try { lines = new UTF8Encoding(false, true).GetString(signed).Split('\n'); }
+            catch { detail = "Das Manifest ist kein gültiger UTF-8-Text."; return Invalid; }
+            if (lines.Length != ManifestKeys.Length + 1 || lines[ManifestKeys.Length].Length != 0)
+            {
+                detail = "Das Manifest hat nicht den erwarteten Aufbau.";
+                return Invalid;
+            }
+            Dictionary<string, string> values = new Dictionary<string, string>(StringComparer.Ordinal);
+            for (int i = 0; i < ManifestKeys.Length; i++)
+            {
+                if (!lines[i].StartsWith(ManifestKeys[i] + "=", StringComparison.Ordinal))
+                {
+                    detail = "Im Manifest fehlt oder steht falsch: " + ManifestKeys[i] + ".";
+                    return Invalid;
+                }
+                values[ManifestKeys[i]] = lines[i].Substring(ManifestKeys[i].Length + 1);
+            }
+            string keyName = values["Schluessel"];
+            string keyXml = keyName == "Haupt" ? MainKey : keyName == "Reserve" ? ReserveKey : null;
+            if (keyXml == null) { detail = "Unbekannter Schlüssel im Manifest: " + keyName; return Invalid; }
+            bool ok;
+            try
+            {
+                // PROV_RSA_AES (24): RSA mit SHA-256 auch unter .NET 4
+                using (RSACryptoServiceProvider rsa = new RSACryptoServiceProvider(new CspParameters(24)))
+                {
+                    rsa.PersistKeyInCsp = false;
+                    rsa.FromXmlString(keyXml);
+                    ok = rsa.VerifyData(signed, "SHA256", signature);
+                }
+            }
+            catch (Exception ex) { detail = "Die Signatur konnte nicht geprüft werden: " + ex.Message; return Invalid; }
+            if (!ok)
+            {
+                detail = "Die Signatur passt nicht zum " + (keyName == "Haupt" ? "Haupt" : "Reserve") +
+                         "schlüssel. Das Release wurde nicht vom Herausgeber signiert oder nachträglich verändert.";
+                return Invalid;
+            }
+            // gültig signiert: Inhalt muss genau zu diesem Programm und dieser Version passen
+            if (values["Programm"] != "Sync Pilot") { detail = "Das Manifest gehört zu „" + values["Programm"] + "“, nicht zu Sync Pilot."; return Invalid; }
+            if (values["Version"] != version) { detail = "Das Manifest nennt Version " + values["Version"] + ", das Release " + version + "."; return Invalid; }
+            if (values["Datei"] != AssetName(version)) { detail = "Das Manifest nennt die Datei „" + values["Datei"] + "“."; return Invalid; }
+            if (!Regex.IsMatch(values["SHA256"], "^[0-9a-f]{64}$")) { detail = "Die Prüfsumme im Manifest ist ungültig."; return Invalid; }
+            sha = values["SHA256"].ToUpperInvariant();
+            return null;
+        }
+
+        static int IndexOf(byte[] data, byte[] pattern)
+        {
+            for (int i = 0; i + pattern.Length <= data.Length; i++)
+            {
+                int j = 0;
+                while (j < pattern.Length && data[i + j] == pattern[j]) j++;
+                if (j == pattern.Length) return i;
+            }
+            return -1;
+        }
+
+        /// <summary>Kleine Datei laden (höchstens max Bytes).</summary>
+        static byte[] DownloadSmall(string url, int max)
+        {
+            HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
+            request.UserAgent = UserAgent;
+            request.Timeout = 15000;
+            request.ReadWriteTimeout = 15000;
+            using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
+            using (Stream stream = response.GetResponseStream())
+            using (MemoryStream ms = new MemoryStream())
+            {
+                byte[] buffer = new byte[4096];
+                int n;
+                while ((n = stream.Read(buffer, 0, buffer.Length)) > 0)
+                {
+                    ms.Write(buffer, 0, n);
+                    if (ms.Length > max) throw new Exception("Die Datei ist zu groß.");
+                }
+                return ms.ToArray();
+            }
+        }
+
+        // ------------------------------------------------------------------ Installation
 
         /// <summary>Im Projektordner (mit Erstellen.bat) wird nicht automatisch ersetzt: dort entsteht die EXE beim Bauen.</summary>
         public static string InstallBlocker()
@@ -133,66 +314,255 @@ namespace SyncPilot
             catch { return false; }
         }
 
+        static int busy;
+        public const string Running = "Ein Update läuft bereits.";
+
+        /// <summary>Läuft gerade ein Update (in diesem Programm oder als Skript nach einem früheren Start)?</summary>
+        public static bool Busy { get { return busy != 0 || ScriptRunning(); } }
+
+        static string ExeDirectory { get { return Path.GetDirectoryName(Application.ExecutablePath); } }
+
+        /// <summary>Kennung des Installationsziels (24 Zeichen der SHA-256 des Programmordners) für Sperre und Arbeitsordner.</summary>
+        static string TargetId
+        {
+            get
+            {
+                string dir = Path.GetFullPath(ExeDirectory).TrimEnd('\\').ToUpperInvariant();
+                using (SHA256 sha = SHA256.Create())
+                    return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(dir))).Replace("-", "").Substring(0, 24);
+            }
+        }
+
+        /// <summary>Sperre des Update-Skripts: sitzungsübergreifend und je Installationsziel.</summary>
+        static string LockName { get { return @"Global\SyncPilot-Update-" + TargetId; } }
+
+        static bool ScriptRunning()
+        {
+            try
+            {
+                Mutex m;
+                if (!Mutex.TryOpenExisting(LockName, out m)) return false;
+                m.Dispose();
+                return true;
+            }
+            catch (UnauthorizedAccessException) { return true; } // vom Skript mit Administratorrechten oder aus einem anderen Konto angelegt
+            catch { return false; }
+        }
+
         /// <summary>
-        /// ZIP herunterladen, Hilfsskript schreiben und starten. Das Skript wartet, bis Sync Pilot beendet ist (auch ein
-        /// gerade laufender Abgleich nach Zeitplan), ersetzt EXE und Liesmich und startet das Programm neu.
-        /// Danach muss der Aufrufer das Programm beenden.
+        /// ZIP herunterladen, Prüfsumme aus dem signierten Manifest kontrollieren und das Update-Skript starten. Das Skript
+        /// wartet, bis Sync Pilot beendet ist (auch ein gerade laufender Abgleich nach Zeitplan), prüft Signatur und
+        /// Prüfsumme selbst noch einmal, ersetzt EXE und Liesmich und startet Sync Pilot neu. Ohne Schreibrechte im
+        /// Programmordner läuft es mit Administratorrechten in einem geschützten Arbeitsordner unter ProgramData; den
+        /// Neustart übernimmt dann ein zweiter Prozess mit normalen Rechten. Danach muss der Aufrufer das Programm beenden.
         /// </summary>
         public static Task Install(ReleaseInfo release, Action<int> progress) { return Install(release, progress, false); }
 
         /// <param name="tray">nach dem Update wieder unsichtbar im Infobereich starten (automatisches Update im Hintergrund)</param>
         public static async Task Install(ReleaseInfo release, Action<int> progress, bool tray)
         {
-            if (string.IsNullOrEmpty(release.ZipUrl)) throw new Exception("Im Release ist keine ZIP-Datei angehängt.");
+            // nur ein Update zur Zeit: von Hand und automatisch teilen sich diese Sperre; sie bleibt nach dem Start des
+            // Skripts gesetzt, weil sich Sync Pilot danach beendet
+            if (Interlocked.CompareExchange(ref busy, 1, 0) != 0) throw new Exception(Running);
+            bool started = false;
+            try
+            {
+                await InstallLocked(release, progress, tray);
+                started = true;
+            }
+            finally
+            {
+                if (!started) Interlocked.Exchange(ref busy, 0);
+            }
+        }
+
+        static async Task InstallLocked(ReleaseInfo release, Action<int> progress, bool tray)
+        {
+            if (release.Problem != null) throw Brief(release.Problem, release.ProblemDetail);
+            if (string.IsNullOrEmpty(release.ZipUrl) || string.IsNullOrEmpty(release.Sha256) || release.Manifest == null) throw new Exception(NoZip);
             string blocker = InstallBlocker();
             if (blocker != null) throw new Exception(blocker);
+            if (ScriptRunning()) throw new Exception(Running);
             PrepareTls();
             Directory.CreateDirectory(Folder);
-            string zip = Path.Combine(Folder, "Sync-Pilot-" + release.Version + ".zip");
+            CleanOldAttempts();
+            // eigener Arbeitsordner je Versuch: Download, Entpacken und Rückfallkopien kommen sich nie in die Quere
+            string attempt = Path.Combine(Folder, Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(attempt);
+            string zip = Path.Combine(attempt, AssetName(release.Version));
             using (WebClient client = new WebClient())
             {
                 client.Headers[HttpRequestHeader.UserAgent] = UserAgent;
                 if (progress != null) client.DownloadProgressChanged += delegate (object s, DownloadProgressChangedEventArgs e) { progress(e.ProgressPercentage); };
                 await client.DownloadFileTaskAsync(new Uri(release.ZipUrl), zip);
             }
-            if (new FileInfo(zip).Length < 1024) throw new Exception("Die heruntergeladene Datei ist unvollständig.");
-            string script = Path.Combine(Folder, "Update.ps1");
-            File.WriteAllText(script, Script, new UTF8Encoding(true));
+            string hash = Sha256Of(zip);
+            if (!string.Equals(hash, release.Sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                try { Directory.Delete(attempt, true); } catch { }
+                throw Brief("Download beschädigt.", "Die Prüfsumme (SHA-256) der heruntergeladenen Datei stimmt nicht mit dem signierten Manifest überein.\r\n" +
+                                                    "Erwartet: " + release.Sha256 + "\r\nErhalten: " + hash);
+            }
             try { File.Delete(LogFile); } catch { }
             string exe = Application.ExecutablePath;
-            string target = Path.GetDirectoryName(exe);
-            ProcessStartInfo start = new ProcessStartInfo("powershell.exe",
-                "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + script + "\" -ProcessId " + Process.GetCurrentProcess().Id +
-                " -Zip \"" + zip + "\" -Exe \"" + exe + "\" -Version \"" + release.Version + "\"" + (tray ? " -Tray" : ""));
-            start.UseShellExecute = true;
-            start.WindowStyle = ProcessWindowStyle.Hidden;
-            // Programmordner ohne Schreibrechte (z. B. unter Programme): Hilfsskript mit Administratorrechten starten
-            if (!CanWrite(target)) start.Verb = "runas";
-            try { Process.Start(start); }
+            // Mit Administratorrechten (Programmordner ohne Schreibrechte oder Sync Pilot läuft selbst als Administrator):
+            // eigener, nicht vorhersagbarer Arbeitsordner unter ProgramData, den das Skript nur für Administratoren
+            // beschreibbar anlegt. Sonst reicht der Temp-Ordner des Benutzers.
+            bool elevated = Elevation.IsAdmin || !CanWrite(Path.GetDirectoryName(exe));
+            string work = elevated
+                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "SyncPilot-Update-" + TargetId + "-" + Guid.NewGuid().ToString("N"))
+                : attempt;
+            // Manifest neben das ZIP legen: Das Skript prüft die Signatur selbst und nimmt die Prüfsumme nur daraus
+            string manifestFile = Path.Combine(attempt, ManifestName(release.Version));
+            File.WriteAllBytes(manifestFile, release.Manifest);
+            int pid = Process.GetCurrentProcess().Id;
+            StringBuilder vars = new StringBuilder();
+            vars.Append("$ProcessId = ").Append(pid).Append("\n");
+            Var(vars, "Zip", zip);
+            Var(vars, "Manifest", manifestFile);
+            Var(vars, "Exe", exe);
+            Var(vars, "Version", release.Version);
+            Var(vars, "Sha256", release.Sha256.ToUpperInvariant());
+            Var(vars, "AssetName", AssetName(release.Version));
+            Var(vars, "MainKey", MainKey);
+            Var(vars, "ReserveKey", ReserveKey);
+            Var(vars, "LockName", LockName);
+            Var(vars, "TargetId", TargetId);
+            Var(vars, "Log", LogFile);
+            Var(vars, "Work", work);
+            Var(vars, "ExeName", ExeName);
+            Var(vars, "ManualName", ManualName);
+            vars.Append("$Elevated = $").Append(elevated ? "true" : "false").Append("\n");
+            vars.Append("$Tray = $").Append(tray ? "true" : "false").Append("\n");
+            ProcessStartInfo start = PowerShell(vars + InstallScript);
+            // Programmordner ohne Schreibrechte (z. B. unter Programme): Skript mit Administratorrechten starten
+            if (elevated && !Elevation.IsAdmin) start.Verb = "runas";
+            Process installer;
+            try { installer = Process.Start(start); }
             catch (System.ComponentModel.Win32Exception ex)
             {
                 if (ex.NativeErrorCode == 1223) throw new Exception("Update abgebrochen (Administratorrechte nicht erteilt).");
                 throw;
             }
+            if (!elevated) return;
+            // Neustart: Ein eigener Prozess wartet auf das Ende des Updates, übernimmt das Ergebnis und startet Sync Pilot.
+            // Ohne eigene Administratorrechte läuft er mit normalen Rechten – Sync Pilot läuft danach also nicht als
+            // Administrator (außer „Immer als Administrator starten“ ist an). Läuft Sync Pilot selbst als Administrator,
+            // erbt er die Rechte: dann schreibt und löscht er nichts im Temp-Ordner des Benutzers.
+            int installerId = 0;
+            try { if (installer != null) installerId = installer.Id; } catch { }
+            StringBuilder r = new StringBuilder();
+            r.Append("$ProcessId = ").Append(pid).Append("\n");
+            r.Append("$Installer = ").Append(installerId).Append("\n");
+            Var(r, "Attempt", attempt);
+            Var(r, "Exe", exe);
+            Var(r, "Log", LogFile);
+            Var(r, "Work", work);
+            r.Append("$UserFiles = $").Append(Elevation.IsAdmin ? "false" : "true").Append("\n");
+            r.Append("$Tray = $").Append(tray ? "true" : "false").Append("\n");
+            Process.Start(PowerShell(r + RestartScript));
         }
 
-        /// <summary>Ergebnis des letzten Updates (nach dem Neustart mit --nach-update).</summary>
+        /// <summary>Arbeitsordner abgebrochener Versuche (älter als ein Tag) im Temp-Ordner entfernen.</summary>
+        static void CleanOldAttempts()
+        {
+            try
+            {
+                foreach (string dir in Directory.GetDirectories(Folder))
+                {
+                    DirectoryInfo di = new DirectoryInfo(dir);
+                    if ((di.Attributes & FileAttributes.ReparsePoint) != 0) continue;
+                    if (di.LastWriteTimeUtc < DateTime.UtcNow.AddDays(-1)) try { di.Delete(true); } catch { }
+                }
+            }
+            catch { }
+        }
+
+        static string Sha256Of(string file)
+        {
+            using (SHA256 sha = SHA256.Create())
+            using (FileStream fs = File.OpenRead(file))
+                return BitConverter.ToString(sha.ComputeHash(fs)).Replace("-", "");
+        }
+
+        /// <summary>PowerShell über den festen Systempfad mit dem Skript als Kommando (-EncodedCommand): Es liegt nirgends als Datei.</summary>
+        static ProcessStartInfo PowerShell(string script)
+        {
+            string system = Environment.GetFolderPath(Environment.SpecialFolder.System);
+            string ps = Path.Combine(system, @"WindowsPowerShell\v1.0\powershell.exe");
+            if (!File.Exists(ps)) throw new Exception("Windows PowerShell wurde nicht gefunden.");
+            // Kommentarzeilen und Einrückung weglassen: Die Befehlszeile darf höchstens 32767 Zeichen lang sein
+            StringBuilder compact = new StringBuilder();
+            foreach (string raw in script.Split('\n'))
+            {
+                string line = raw.Trim();
+                if (line.Length == 0 || line.StartsWith("#", StringComparison.Ordinal)) continue;
+                compact.Append(line).Append('\n');
+            }
+            string arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand " +
+                               Convert.ToBase64String(Encoding.Unicode.GetBytes(compact.ToString()));
+            if (arguments.Length > 32000) throw new Exception("Das Update-Skript ist zu lang.");
+            ProcessStartInfo start = new ProcessStartInfo(ps, arguments);
+            start.UseShellExecute = true;
+            start.WindowStyle = ProcessWindowStyle.Hidden;
+            start.WorkingDirectory = system;
+            return start;
+        }
+
+        /// <summary>Variable für das Skript als PowerShell-Text in einfachen Anführungszeichen.</summary>
+        static void Var(StringBuilder sb, string name, string value)
+        {
+            sb.Append('$').Append(name).Append(" = '");
+            foreach (char c in value ?? "")
+            {
+                if (c == '\n' || c == '\r') throw new Exception("Ungültiger Pfad für das Update.");
+                sb.Append(c);
+                // PowerShell nimmt auch typografische einfache Anführungszeichen als Begrenzer: verdoppeln
+                if (c == '\'' || c == '‘' || c == '’' || c == '‚' || c == '‛') sb.Append(c);
+            }
+            sb.Append("'\n");
+        }
+
+        /// <summary>
+        /// Ergebnis des letzten Updates (nach dem Neustart mit --nach-update). Lief Sync Pilot als Administrator, liegt es
+        /// nur im geschützten Arbeitsordner unter ProgramData (neuester für dieses Programmverzeichnis).
+        /// </summary>
         public static string LastResult()
         {
-            try { return File.Exists(LogFile) ? File.ReadAllText(LogFile, Encoding.UTF8).Trim() : null; }
-            catch { return null; }
+            try { if (File.Exists(LogFile)) return File.ReadAllText(LogFile, Encoding.UTF8).Trim(); } catch { }
+            try
+            {
+                string root = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+                DirectoryInfo newest = null;
+                foreach (DirectoryInfo d in new DirectoryInfo(root).GetDirectories("SyncPilot-Update-" + TargetId + "-*"))
+                    if ((d.Attributes & FileAttributes.ReparsePoint) == 0 && (newest == null || d.LastWriteTimeUtc > newest.LastWriteTimeUtc)) newest = d;
+                if (newest != null && newest.LastWriteTimeUtc > DateTime.UtcNow.AddHours(-1))
+                {
+                    string log = Path.Combine(newest.FullName, "Update.log");
+                    if (File.Exists(log)) return File.ReadAllText(log, Encoding.UTF8).Trim();
+                }
+            }
+            catch { }
+            return null;
         }
 
-        // Wartet auf das Ende dieser Oberfläche und aller anderen Sync-Pilot-Prozesse mit derselben EXE
-        // (z. B. ein Abgleich nach Zeitplan, höchstens 30 Minuten), damit die EXE nicht gesperrt ist.
-        const string Script = @"# Sync Pilot – Update (wird vom Programm erzeugt)
-param([int]$ProcessId,[string]$Zip,[string]$Exe,[string]$Version,[switch]$Tray)
+        // Update-Skript. Davor setzt das Programm: $ProcessId, $Zip, $Manifest, $Exe, $Version, $Sha256, $AssetName,
+        // $MainKey, $ReserveKey, $LockName, $TargetId, $Log, $Work, $ExeName, $ManualName, $Elevated, $Tray.
+        // Nur ASCII-Anführungszeichen verwenden.
+        const string InstallScript = @"
 $ErrorActionPreference = 'Stop'
-$log = Join-Path $PSScriptRoot 'Update.log'
-$name = Split-Path $Exe -Leaf
 $target = Split-Path $Exe -Parent
+$workReady = -not $Elevated
+$result = $null
+$lock = $null
+$haveLock = $false
 try {
+  # nur ein Update zur Zeit (Sperre bis zum Ende dieses Skripts)
+  $lock = New-Object System.Threading.Mutex($false, $LockName)
+  try { $haveLock = $lock.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $haveLock = $true }
+  if (-not $haveLock) { throw 'Ein anderes Update laeuft gerade.' }
   try { Wait-Process -Id $ProcessId -Timeout 60 -ErrorAction SilentlyContinue } catch {}
+  # auch andere Sync-Pilot-Prozesse mit derselben EXE abwarten (z. B. ein Abgleich nach Zeitplan, hoechstens 30 Minuten)
   $until = (Get-Date).AddMinutes(30)
   while ((Get-Date) -lt $until) {
     $running = Get-Process -ErrorAction SilentlyContinue | Where-Object { try { $_.Path -eq $Exe } catch { $false } }
@@ -200,28 +570,175 @@ try {
     Start-Sleep -Seconds 2
   }
   Start-Sleep -Milliseconds 500
-  $dir = Join-Path $PSScriptRoot 'Neu'
-  if (Test-Path $dir) { Remove-Item $dir -Recurse -Force }
-  Expand-Archive -Path $Zip -DestinationPath $dir -Force
-  $new = Get-ChildItem $dir -Recurse -File | Where-Object { $_.Name -eq $name } | Select-Object -First 1
-  if (-not $new) { throw ('Im ZIP fehlt ' + $name) }
-  $old = $Exe + '.alt'
-  Copy-Item $Exe $old -Force
+  if ($Elevated) {
+    $admins = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544')
+    $system = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-18')
+    $users = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-11')
+    $root = [Environment]::GetFolderPath('CommonApplicationData')
+    if ((Split-Path $Work -Parent) -ne $root -or (Split-Path $Work -Leaf) -notlike ('SyncPilot-Update-' + $TargetId + '-*')) { throw 'Unerwarteter Arbeitsordner.' }
+    # alte Arbeitsordner frueherer Updates entfernen: nur eigene (Besitzer Administratoren), keine Verknuepfungen,
+    # nur nachweislich inaktive: gleiches Ziel (diese Sperre halten wir) oder anderes Ziel ohne gehaltene Sperre
+    # und mindestens eine Stunde unveraendert
+    Get-ChildItem -LiteralPath $root -Directory -Filter 'SyncPilot-Update-*' -Force -ErrorAction SilentlyContinue | ForEach-Object {
+      try {
+        if (-not ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+          $o = (Get-Acl -LiteralPath $_.FullName).GetOwner([System.Security.Principal.SecurityIdentifier])
+          if ($o -eq $admins -or $o -eq $system) {
+            $inactive = $false
+            if ($_.Name -match '^SyncPilot-Update-([0-9A-F]{24})-[0-9a-f]{32}$') {
+              if ($Matches[1] -ceq $TargetId) { $inactive = $_.LastWriteTimeUtc -lt [DateTime]::UtcNow.AddMinutes(-10) }
+              else {
+                $held = $true
+                try { $other = $null; $held = [System.Threading.Mutex]::TryOpenExisting('Global\SyncPilot-Update-' + $Matches[1], [ref]$other); if ($other) { $other.Dispose() } } catch { $held = $true }
+                $inactive = (-not $held) -and ($_.LastWriteTimeUtc -lt [DateTime]::UtcNow.AddHours(-1))
+              }
+            } else {
+              $inactive = $_.LastWriteTimeUtc -lt [DateTime]::UtcNow.AddHours(-1)
+            }
+            if ($inactive) { [System.IO.Directory]::Delete($_.FullName, $true) }
+          }
+        }
+      } catch {}
+    }
+    # Arbeitsordner gleich mit Rechten anlegen: schreiben nur SYSTEM und Administratoren, lesen alle angemeldeten Benutzer
+    $inherit = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+    $none = [System.Security.AccessControl.PropagationFlags]::None
+    $sec = New-Object System.Security.AccessControl.DirectorySecurity
+    $sec.SetAccessRuleProtection($true, $false)
+    $sec.SetOwner($admins)
+    foreach ($sid in @($admins, $system)) {
+      $sec.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($sid, 'FullControl', $inherit, $none, 'Allow')))
+    }
+    $sec.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($users, 'ReadAndExecute', $inherit, $none, 'Allow')))
+    if (Test-Path -LiteralPath $Work) { throw 'Der Arbeitsordner fuer das Update existiert bereits.' }
+    [void][System.IO.Directory]::CreateDirectory($Work, $sec)
+    $o = (Get-Acl -LiteralPath $Work).GetOwner([System.Security.Principal.SecurityIdentifier])
+    if (-not ($o -eq $admins -or $o -eq $system)) { throw 'Der Arbeitsordner fuer das Update ist nicht geschuetzt.' }
+    $workReady = $true
+    $zipWork = Join-Path $Work 'Update.zip'
+    $manifestWork = Join-Path $Work 'Update.manifest'
+    Copy-Item -LiteralPath $Zip -Destination $zipWork -Force
+    Copy-Item -LiteralPath $Manifest -Destination $manifestWork -Force
+  } else {
+    $zipWork = $Zip
+    $manifestWork = $Manifest
+  }
+  # Signatur des Manifests selbst pruefen (an der Kopie, die verwendet wird)
+  $bytes = [System.IO.File]::ReadAllBytes($manifestWork)
+  if ($bytes.Length -gt 8192) { throw 'Das Manifest ist zu gross.' }
+  $marker = [System.Text.Encoding]::ASCII.GetBytes([string][char]10 + 'Signatur=')
+  $at = -1
+  for ($i = 0; $i -le $bytes.Length - $marker.Length -and $at -lt 0; $i++) {
+    $j = 0
+    while ($j -lt $marker.Length -and $bytes[$i + $j] -eq $marker[$j]) { $j++ }
+    if ($j -eq $marker.Length) { $at = $i }
+  }
+  if ($at -lt 0) { throw 'Im Manifest fehlt die Signatur.' }
+  $signed = New-Object byte[] ($at + 1)
+  [System.Array]::Copy($bytes, $signed, $at + 1)
+  $sig = [System.Convert]::FromBase64String([System.Text.Encoding]::ASCII.GetString($bytes, $at + $marker.Length, $bytes.Length - $at - $marker.Length).Trim())
+  $lines = (New-Object System.Text.UTF8Encoding($false, $true)).GetString($signed).Split([char]10)
+  $names = @('Programm', 'Version', 'Datei', 'SHA256', 'Schluessel', 'Erstellt')
+  if ($lines.Count -ne 7 -or $lines[6] -ne '') { throw 'Das Manifest hat nicht den erwarteten Aufbau.' }
+  $mv = @{}
+  for ($i = 0; $i -lt 6; $i++) {
+    $p = $names[$i] + '='
+    if (-not $lines[$i].StartsWith($p, [System.StringComparison]::Ordinal)) { throw ('Im Manifest fehlt ' + $names[$i] + '.') }
+    $mv[$names[$i]] = $lines[$i].Substring($p.Length)
+  }
+  if ($mv['Schluessel'] -ceq 'Haupt') { $keyXml = $MainKey }
+  elseif ($mv['Schluessel'] -ceq 'Reserve') { $keyXml = $ReserveKey }
+  else { throw 'Unbekannter Schluessel im Manifest.' }
+  $csp = New-Object System.Security.Cryptography.CspParameters -ArgumentList 24
+  $rsa = New-Object System.Security.Cryptography.RSACryptoServiceProvider -ArgumentList $csp
+  $rsa.PersistKeyInCsp = $false
+  $rsa.FromXmlString($keyXml)
+  $valid = $rsa.VerifyData($signed, 'SHA256', $sig)
+  $rsa.Clear()
+  if (-not $valid) { throw 'Die Signatur des Updates ist ungueltig.' }
+  if ($mv['Programm'] -cne 'Sync Pilot' -or $mv['Version'] -cne $Version -or $mv['Datei'] -cne $AssetName) { throw 'Das Manifest passt nicht zu diesem Update.' }
+  if ($mv['SHA256'] -cnotmatch '^[0-9a-f]{64}$') { throw 'Die Pruefsumme im Manifest ist ungueltig.' }
+  $expected = $mv['SHA256'].ToUpperInvariant()
+  if ($expected -ne $Sha256) { throw 'Die Pruefsumme im Manifest weicht von der Pruefung im Programm ab.' }
+  # Pruefsumme aus dem geprueften Manifest an der Datei pruefen, die tatsaechlich entpackt wird
+  $hash = (Get-FileHash -LiteralPath $zipWork -Algorithm SHA256).Hash
+  if ($hash -ne $expected) { throw ('Die Pruefsumme des Updates stimmt nicht (erwartet ' + $expected + ', erhalten ' + $hash + ').') }
+  $dir = Join-Path $Work 'Neu'
+  if (Test-Path -LiteralPath $dir) { Remove-Item -LiteralPath $dir -Recurse -Force }
+  Expand-Archive -LiteralPath $zipWork -DestinationPath $dir -Force
+  # nur bekannte Dateien uebernehmen
+  $new = Join-Path $dir $ExeName
+  if (-not (Test-Path -LiteralPath $new -PathType Leaf)) { throw ('Im ZIP fehlt ' + $ExeName) }
+  $pairs = @(,@($new, $Exe))
+  $manual = Join-Path $dir $ManualName
+  if (Test-Path -LiteralPath $manual -PathType Leaf) { $pairs += ,@($manual, (Join-Path $target $ManualName)) }
+  # Rueckfallkopien im eigenen Arbeitsordner, nicht neben den Programmdateien
+  $alt = Join-Path $Work 'Alt'
+  New-Item -ItemType Directory -Path $alt -Force | Out-Null
+  $done = @()
+  $i = 0
   try {
-    Copy-Item $new.FullName $Exe -Force
-    Get-ChildItem $new.DirectoryName -File | Where-Object { $_.Name -ne $name } | Copy-Item -Destination $target -Force
+    foreach ($p in $pairs) {
+      $i++
+      $bak = Join-Path $alt ([string]$i)
+      $had = Test-Path -LiteralPath $p[1]
+      if ($had) { Copy-Item -LiteralPath $p[1] -Destination $bak -Force }
+      $done += ,@($p[1], $bak, $had)
+      Copy-Item -LiteralPath $p[0] -Destination $p[1] -Force
+    }
   } catch {
-    Copy-Item $old $Exe -Force
+    foreach ($d in $done) {
+      if ($d[2]) { Copy-Item -LiteralPath $d[1] -Destination $d[0] -Force }
+      else { Remove-Item -LiteralPath $d[0] -Force -ErrorAction SilentlyContinue }
+    }
     throw
   }
-  Remove-Item $old -Force
-  Remove-Item $dir -Recurse -Force
-  Remove-Item $Zip -Force
-  ('OK ' + $Version) | Out-File $log -Encoding utf8
+  Remove-Item -LiteralPath $alt -Recurse -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $zipWork -Force -ErrorAction SilentlyContinue
+  if ($Elevated) { Remove-Item -LiteralPath $manifestWork -Force -ErrorAction SilentlyContinue }
+  $result = 'OK ' + $Version
 } catch {
-  ('FEHLER ' + $_.Exception.Message) | Out-File $log -Encoding utf8
+  $result = 'FEHLER ' + $_.Exception.Message
 }
-if ($Tray) { Start-Process -FilePath $Exe -ArgumentList '--nach-update','/tray' } else { Start-Process -FilePath $Exe -ArgumentList '--nach-update' }
+if ($Elevated) {
+  # Ergebnis nur in den eigenen, geschuetzten Arbeitsordner schreiben; Neustart macht der zweite Prozess
+  if ($workReady) { try { $result | Out-File -LiteralPath (Join-Path $Work 'Update.log') -Encoding utf8 } catch {} }
+} else {
+  try { $result | Out-File -LiteralPath $Log -Encoding utf8 } catch {}
+  Remove-Item -LiteralPath $Work -Recurse -Force -ErrorAction SilentlyContinue
+}
+if ($haveLock) { try { $lock.ReleaseMutex() } catch {} }
+if (-not $Elevated) {
+  if ($Tray) { Start-Process -FilePath $Exe -ArgumentList '--nach-update','/tray' }
+  else { Start-Process -FilePath $Exe -ArgumentList '--nach-update' }
+}
+";
+
+        // Neustart nach einem Update mit Administratorrechten. Davor setzt das Programm: $ProcessId, $Installer,
+        // $Attempt, $Exe, $Log, $Work, $UserFiles, $Tray. Mit $UserFiles = $false (Prozess hat selbst Administratorrechte)
+        // nichts im Temp-Ordner des Benutzers schreiben oder löschen: Das Ergebnis liest Sync Pilot dann aus $Work.
+        const string RestartScript = @"
+$ErrorActionPreference = 'SilentlyContinue'
+try { Wait-Process -Id $ProcessId -Timeout 60 } catch {}
+$end = (Get-Date).AddMinutes(45)
+$workLog = Join-Path $Work 'Update.log'
+while ((Get-Date) -lt $end) {
+  if ($Installer -gt 0) { if (-not (Get-Process -Id $Installer -ErrorAction SilentlyContinue)) { break } }
+  elseif (Test-Path -LiteralPath $workLog) { break }
+  Start-Sleep -Milliseconds 500
+}
+Start-Sleep -Milliseconds 300
+if ($UserFiles) {
+  $text = $null
+  if (Test-Path -LiteralPath $workLog) { $text = Get-Content -LiteralPath $workLog -Raw -Encoding UTF8 }
+  if ($text) { $text = $text.Trim() }
+  if (-not $text) { $text = 'FEHLER Das Update wurde nicht ausgefuehrt.' }
+  $text | Out-File -LiteralPath $Log -Encoding utf8
+  Remove-Item -LiteralPath $Attempt -Recurse -Force
+}
+if ($Tray) { Start-Process -FilePath $Exe -ArgumentList '--nach-update','/tray' }
+else { Start-Process -FilePath $Exe -ArgumentList '--nach-update' }
 ";
     }
 

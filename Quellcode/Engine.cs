@@ -572,6 +572,7 @@ namespace SyncPilot
         public static SyncJob Prepare(SyncJob job)
         {
             SyncJob r = job.Clone();
+            r.Prepared = true;
             r.FolderA = Paths.Resolve(job.FolderA);
             r.FolderB = Paths.Resolve(job.FolderB);
             NetShare.Connect(r.FolderA, job.UserA, job.PassA);
@@ -582,6 +583,8 @@ namespace SyncPilot
         public static Analysis Analyze(SyncJob job, Func<bool> cancel, Action<string> status)
         {
             Stopwatch sw = Stopwatch.StartNew();
+            // Mit Administratorrechten nur bestätigte Aufgaben (JobSeal) – vor allem anderen, auch vor der Sperrdatei
+            JobSeal.Check(job);
             status("Verbinde \u2026");
             LockFiles.CheckFree(job);
             ignoreDst = job.IgnoreDstOffset;
@@ -1668,7 +1671,11 @@ namespace SyncPilot
             // Sperrdatei schon vor der Analyse holen (sonst könnte sich zwischen Analyse und Kopieren etwas ändern);
             // automatische Läufe warten bis zu 30 Minuten, manuelle brechen sofort ab
             LockFiles lk;
-            try { lk = LockFiles.Acquire(job, scheduled, 30, cancel, status, null); }
+            try
+            {
+                JobSeal.Check(job); // Sperrdatei liegt an einem Pfad aus der Aufgabe: auch sie erst nach der Prüfung
+                lk = LockFiles.Acquire(job, scheduled, 30, cancel, status, null);
+            }
             catch (Exception ex) { return Fail(job, scheduled, ex is OperationCanceledException ? null : ex.Message); }
             try
             {

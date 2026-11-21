@@ -241,12 +241,60 @@ namespace SyncPilot
                     Thread.Sleep(200);
                     continue;
                 }
-                ThreadPool.QueueUserWorkItem(delegate { Serve(c); });
+                // Verbindungen vor der Anmeldung begrenzen (gesamt und je Absender), damit langsame oder viele
+                // Verbindungen nicht alle Threads binden: überzählige sofort schließen
+                IPAddress peer;
+                try
+                {
+                    peer = ((IPEndPoint)c.Client.RemoteEndPoint).Address;
+                    if (peer.IsIPv4MappedToIPv6) peer = peer.MapToIPv4();
+                }
+                catch { try { c.Close(); } catch { } continue; }
+                string key = peer.ToString();
+                if (!Enter(key)) { try { c.Close(); } catch { } continue; }
+                ThreadPool.QueueUserWorkItem(delegate
+                {
+                    try { Serve(c); }
+                    finally { Leave(key); }
+                });
+            }
+        }
+
+        const int MaxConnections = 64, MaxPerAddress = 16;
+        static int activeTotal;
+        static readonly Dictionary<string, int> activePer = new Dictionary<string, int>();
+
+        static bool Enter(string addr)
+        {
+            lock (activePer)
+            {
+                int n;
+                activePer.TryGetValue(addr, out n);
+                if (activeTotal >= MaxConnections || n >= MaxPerAddress) return false;
+                activePer[addr] = n + 1;
+                activeTotal++;
+                return true;
+            }
+        }
+
+        static void Leave(string addr)
+        {
+            lock (activePer)
+            {
+                int n;
+                if (activePer.TryGetValue(addr, out n))
+                {
+                    if (n <= 1) activePer.Remove(addr); else activePer[addr] = n - 1;
+                }
+                activeTotal--;
             }
         }
 
         static void Serve(TcpClient c)
         {
+            // Feste Frist für Handshake, Kopfzeilen und Inhalt zusammen: ReceiveTimeout gilt nur je Lesevorgang,
+            // ein Absender, der alle paar Sekunden ein Byte schickt, würde die Verbindung sonst beliebig lange halten
+            System.Threading.Timer deadline = new System.Threading.Timer(delegate { try { c.Close(); } catch { } }, null, 30000, Timeout.Infinite);
             try
             {
                 using (c)
@@ -285,11 +333,12 @@ namespace SyncPilot
                             return;
                         }
                         SslStream ssl = new SslStream(ns, false);
-                        ssl.AuthenticateAsServer(cert, false, (SslProtocols)(3072 | 768), false); // TLS 1.2 / 1.1
+                        ssl.AuthenticateAsServer(cert, false, (SslProtocols)3072, false); // nur TLS 1.2 (1.0/1.1 gelten als unsicher)
                         ns = ssl;
                     }
                     WebRequest_ rq = ReadRequest(ns);
                     if (rq == null) return;
+                    deadline.Dispose(); // Anfrage vollständig da: Antworten (z. B. Protokolle) dürfen länger dauern
                     rq.Remote = remote.ToString();
                     WebResponse_ rs;
                     try { rs = WebApi.Handle(rq); }
@@ -299,6 +348,7 @@ namespace SyncPilot
                 }
             }
             catch { }
+            finally { deadline.Dispose(); }
         }
 
         static string SafeHost(string host)
@@ -959,23 +1009,31 @@ namespace SyncPilot
                         run.StartAnalysis(job, Flag(body, "sync") && !job.Disabled); // deaktiviert: nur analysieren
                         return AnalysisJson(job, run);
                     case "POST sync":
+                        // Prüfen und Starten unter derselben Sperre: dazwischen darf keine andere Anfrage die Auswahl ändern
+                        // (sonst liefe ein Plan, der so nicht freigegeben wurde). Mit „rev“ nur den Stand, den das Handy zeigt.
                         lock (run)
                         {
                             if (job.Disabled) return WebResponse_.Error(409, "Die Aufgabe ist deaktiviert.");
                             if (run.An == null) return WebResponse_.Error(409, "Bitte zuerst analysieren.");
+                            object rev;
+                            bool hasRev = body.TryGetValue("rev", out rev) && rev is int && (int)rev >= 0;
+                            if (hasRev && (int)rev != run.Version)
+                                return WebResponse_.Error(409, "Die Liste hat sich geändert – bitte noch einmal prüfen.");
                             if ((DateTime.UtcNow - run.AnalyzedAt).TotalMinutes > 15)
                                 return WebResponse_.Error(409, "Die Analyse ist \u00e4lter als 15 Minuten \u2013 bitte neu analysieren.");
                             string warn = Engine.SafetyCheck(run.An);
-                            if (warn != null && !Flag(body, "force"))
+                            // „Trotzdem“ gilt nur für genau den Stand, zu dem die Warnung kam (rev aus der Warnung), sonst neu fragen
+                            if (warn != null && (!Flag(body, "force") || !hasRev))
                             {
                                 Dictionary<string, object> d = new Dictionary<string, object>();
                                 d["confirm"] = "Achtung: " + warn + ". Trotzdem synchronisieren?";
+                                d["rev"] = run.Version;
                                 WebResponse_ r = WebResponse_.Json(d);
                                 r.Status = 409;
                                 return r;
                             }
+                            run.StartSync(job); // gleiche Sperre (Monitor ist wiedereintrittsfähig), Wechsel auf „sync“ sofort
                         }
-                        run.StartSync(job);
                         return AnalysisJson(job, run);
                     case "POST cancel":
                         run.Cancel = true;
@@ -1189,6 +1247,12 @@ namespace SyncPilot
                 System.Collections.IList idx = items as System.Collections.IList;
                 System.Collections.IList names = rels as System.Collections.IList;
                 if (idx == null || names == null || names.Count != idx.Count) return WebResponse_.Error(400, "Keine Einträge gewählt.");
+                // Erst alles prüfen (Stand und jeder Eintrag), dann alles auf einmal übernehmen: Eine abgelehnte Anfrage
+                // ändert nichts – sonst gälte eine frühere Bestätigung für einen halb geänderten Plan
+                object rev;
+                if (body.TryGetValue("rev", out rev) && rev is int && (int)rev >= 0 && (int)rev != run.Version)
+                    return WebResponse_.Error(409, "Die Liste hat sich geändert – bitte erneut auswählen.");
+                List<PlanItem> chosen = new List<PlanItem>();
                 for (int n = 0; n < idx.Count; n++)
                 {
                     object o = idx[n];
@@ -1198,12 +1262,15 @@ namespace SyncPilot
                     PlanItem it = run.An.Actions[i];
                     string rel = it.IsDir ? it.Rel + "\\" : it.Rel;
                     if (rel != names[n] as string) return WebResponse_.Error(409, "Die Liste hat sich geändert – bitte erneut auswählen.");
-                    if (a == "Vorschlag") it.Choose(it.Proposed);
-                    else
-                    {
-                        ActionKind k;
-                        if (Enum.TryParse(a, out k) && it.CanChoose(k)) it.Choose(k);
-                    }
+                    chosen.Add(it);
+                }
+                ActionKind kind = ActionKind.Keine;
+                bool proposal = a == "Vorschlag";
+                if (!proposal && !Enum.TryParse(a, out kind)) return WebResponse_.Error(400, "Unbekannte Aktion.");
+                foreach (PlanItem it in chosen)
+                {
+                    if (proposal) it.Choose(it.Proposed);
+                    else if (it.CanChoose(kind)) it.Choose(kind);
                 }
                 run.Version++;
             }

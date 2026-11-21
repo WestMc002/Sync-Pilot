@@ -217,10 +217,12 @@ namespace SyncPilot
                 psi.StandardOutputEncoding = oem;
                 psi.StandardErrorEncoding = oem;
                 psi.WorkingDirectory = WorkDir(cmd, job);
-                psi.EnvironmentVariables["SYNCPILOT_AUFGABE"] = job.Name ?? "";
+                // Mit Administratorrechten Texte ohne Sonderzeichen der Shell übergeben: Ein Skript, das %SYNCPILOT_AUFGABE%
+                // ungequotet verwendet, würde sonst z. B. „&“ im Aufgabennamen als zweiten Befehl ausführen
+                psi.EnvironmentVariables["SYNCPILOT_AUFGABE"] = Elevation.IsAdmin ? ShellSafe(job.Name) : job.Name ?? "";
                 psi.EnvironmentVariables["SYNCPILOT_A"] = Paths.TryResolve(job.FolderA);
                 psi.EnvironmentVariables["SYNCPILOT_B"] = Paths.TryResolve(job.FolderB);
-                psi.EnvironmentVariables["SYNCPILOT_ERGEBNIS"] = result ?? "";
+                psi.EnvironmentVariables["SYNCPILOT_ERGEBNIS"] = Elevation.IsAdmin ? ShellSafe(result) : result ?? "";
                 using (Process p = new Process())
                 {
                     p.StartInfo = psi;
@@ -313,7 +315,15 @@ namespace SyncPilot
         }
 
         /// <summary>Arbeitsordner: Ordner des Skripts, sonst Ordner A (falls lokal), sonst der Programmordner.</summary>
-        static string WorkDir(string cmd, SyncJob job)
+        /// <summary>Sonderzeichen der Shell (&amp; | &lt; &gt; ^ % ! " ( )) durch „_“ ersetzen.</summary>
+        static string ShellSafe(string text)
+        {
+            StringBuilder b = new StringBuilder();
+            foreach (char c in text ?? "") b.Append("&|<>^%!\"()".IndexOf(c) >= 0 || c < ' ' ? '_' : c);
+            return b.ToString();
+        }
+
+        public static string WorkDir(string cmd, SyncJob job)
         {
             try
             {

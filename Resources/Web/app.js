@@ -485,7 +485,7 @@
     if (it.chosen !== it.proposed) opts.push(['Vorschlag', 'Vorschlag wiederherstellen']);
     sheet(it.rel, it.reason, opts.map(function (o) {
       return [o[1], function () {
-        api('POST', '/api/jobs/' + encodeURIComponent(state.analysisJob) + '/choose', { items: [it.i], rels: [it.rel], action: o[0] }).then(function (d) {
+        api('POST', '/api/jobs/' + encodeURIComponent(state.analysisJob) + '/choose', { items: [it.i], rels: [it.rel], action: o[0], rev: state.anVersion }).then(function (d) {
           if (d._status === 200) { state.anVersion = -1; renderAnalysis(d); }
           else { $('an-status').textContent = d.error || 'Fehler'; state.anVersion = -1; stopTimer(); pollAnalysis(); }
         }).catch(function () {});
@@ -501,16 +501,17 @@
     api('POST', '/api/jobs/' + encodeURIComponent(state.analysisJob) + '/cancel').catch(function () {});
   });
 
-  function sync(force) {
-    api('POST', '/api/jobs/' + encodeURIComponent(state.analysisJob) + '/sync', { force: force }).then(function (d) {
+  // rev: bei „Trotzdem“ der Stand aus der Warnung – hat sich die Liste inzwischen geändert, fragt der Server neu
+  function sync(force, rev) {
+    api('POST', '/api/jobs/' + encodeURIComponent(state.analysisJob) + '/sync', { force: !!force, rev: force ? rev : state.anVersion }).then(function (d) {
       if (d._status === 409 && d.confirm) {
         // eigene Rückfrage im Design der Seite statt window.confirm; Vorauswahl ist „Schließen“ (riskante Aktion)
-        sheet('Trotzdem synchronisieren?', d.confirm, [['Trotzdem synchronisieren', function () { sync(true); }, false]]);
+        sheet('Trotzdem synchronisieren?', d.confirm, [['Trotzdem synchronisieren', function () { sync(true, d.rev); }, false]]);
         $('sheet-close').textContent = 'Abbrechen';
         $('sheet-close').focus();
         return;
       }
-      if (d._status !== 200) { $('an-status').textContent = d.error || 'Fehler'; return; }
+      if (d._status !== 200) { $('an-status').textContent = d.error || 'Fehler'; stopTimer(); pollAnalysis(); return; }
       stopTimer();
       pollAnalysis();
     }).catch(function () {});

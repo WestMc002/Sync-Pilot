@@ -33,30 +33,39 @@ namespace SyncPilot
         }
 
         // Liefert null bei Erfolg, sonst eine Fehlermeldung.
-        public static string Apply(SyncJob job)
+        public static string Apply(SyncJob job) { return Apply(job, false); }
+
+        /// <summary>
+        /// Zeitplan einrichten. seal = true nur, wenn der Benutzer die Aufgabe gerade selbst gespeichert hat: Dann wird der
+        /// Prüfwert (JobSeal) im selben Schritt mit Administratorrechten geschrieben (nur eine Abfrage von Windows).
+        /// Automatische Neueinrichtungen (Programm verschoben, alte Zeitpläne) bestätigen nie etwas.
+        /// </summary>
+        public static string Apply(SyncJob job, bool seal)
         {
-            // Zeitplan mit Administratorrechten ohne eigene Rechte: Löschen und Anlegen gemeinsam in einem
-            // Aufruf als Administrator (nur eine Abfrage von Windows statt zwei)
-            bool asAdmin = job.RunAsAdmin && !Elevation.IsAdmin && !job.Disabled &&
-                           ((job.Schedule == ScheduleKind.Uhrzeiten && job.Times != null && job.Times.Count > 0) ||
-                            job.Schedule == ScheduleKind.Intervall || job.Schedule == ScheduleKind.BeiAnmeldung);
             string oldTask = job.ScheduledTask;
-            if (asAdmin) { job.ScheduledTask = null; Remove(job); }
-            else Remove(job);
-            if (job.Disabled) return null; // deaktiviert: kein Zeitplan
-            job.Upgrade(); // ältere Zeitpläne (Täglich, Stündlich) umstellen
-            job.NeedsReapply = false;
-            string err = null;
+            if (!job.Disabled) job.Upgrade(); // ältere Zeitpläne (Täglich, Stündlich) umstellen
             // Mit Administratorrechten "bei Anmeldung": über die Aufgabenplanung (Autostart kann keine Rechte erhöhen)
             bool logonTask = job.Schedule == ScheduleKind.BeiAnmeldung && job.RunAsAdmin;
-            switch (logonTask ? ScheduleKind.Intervall : job.Schedule)
+            bool wantsTask = !job.Disabled &&
+                ((job.Schedule == ScheduleKind.Uhrzeiten && job.Times != null && job.Times.Count > 0) ||
+                 job.Schedule == ScheduleKind.Intervall || logonTask);
+            // Aufgabe mit höchsten Rechten bzw. Sync Pilot selbst als Administrator: Eintragen immer über ein Skript mit
+            // Administratorrechten, das die Aufgabenbeschreibung selbst in einen geschützten Ordner schreibt. Eine Datei in
+            // einem benutzerbeschreibbaren Ordner könnte zwischen Schreiben und Eintragen ausgetauscht werden.
+            bool elevated = wantsTask && (job.RunAsAdmin || Elevation.IsAdmin);
+            if (elevated) { job.ScheduledTask = null; Remove(job); } // alte Aufgabe löscht das Skript mit
+            else Remove(job);
+            if (job.Disabled) return null; // deaktiviert: kein Zeitplan
+            job.NeedsReapply = false;
+            string err = null;
+            if (wantsTask)
             {
-                case ScheduleKind.Uhrzeiten:
-                case ScheduleKind.Intervall:
+                string tn = TaskName(job);
+                string xml = TaskXml(job);
+                if (elevated)
+                    err = RegisterElevated(tn, xml, oldTask, seal && JobSeal.Needed(job) ? job : null);
+                else
                 {
-                    if (job.Schedule == ScheduleKind.Uhrzeiten && (job.Times == null || job.Times.Count == 0)) break;
-                    string tn = TaskName(job);
-                    string xml = TaskXml(job);
                     // nicht in %TEMP%: bei Remotedesktop zeigt das auf einen Sitzungsordner (…\Temp\2), den Windows
                     // nach der Abmeldung löscht – dann fehlt der Ordner. Eigener Datenordner, notfalls neu angelegt.
                     string file = Path.Combine(Store.Dir, "SyncPilot_" + job.Id + ".xml");
@@ -65,39 +74,56 @@ namespace SyncPilot
                         Directory.CreateDirectory(Path.GetDirectoryName(file));
                         // schtasks erwartet die Aufgabenbeschreibung als UTF-16
                         File.WriteAllText(file, xml, Encoding.Unicode);
-                        string args = "/Create /F /TN \"" + tn + "\" /XML \"" + file + "\"";
-                        // höchste Rechte bzw. eine vorher mit Administratorrechten angelegte Aufgabe: nur als Administrator
-                        if (asAdmin)
-                        {
-                            string sch = "\"" + Path.Combine(Environment.SystemDirectory, "schtasks.exe") + "\" ";
-                            string cmd = sch + args;
-                            if (!string.IsNullOrEmpty(oldTask) && !string.Equals(oldTask, tn, StringComparison.OrdinalIgnoreCase))
-                                cmd = sch + "/Delete /F /TN \"" + oldTask + "\" >nul 2>&1 & " + cmd;
-                            int rc = Elevation.RunAndWait(Path.Combine(Environment.SystemDirectory, "cmd.exe"), "/d /s /c \"" + cmd + "\"");
-                            err = rc == 0 ? null : rc == -1 ? "F\u00fcr den Zeitplan mit Administratorrechten fehlt die Best\u00e4tigung von Windows."
-                                : "schtasks.exe meldet Fehler " + rc + " (mit Administratorrechten)";
-                        }
-                        else
-                        {
-                            err = Schtasks(args);
-                            if (err != null && Denied(err) && !Elevation.IsAdmin) err = SchtasksAdmin(args);
-                        }
+                        err = Schtasks("/Create /F /TN \"" + tn + "\" /XML \"" + file + "\"");
                     }
                     catch (Exception ex) { err = ex.Message; }
                     finally { try { File.Delete(file); } catch { } }
-                    if (err == null) job.ScheduledTask = tn;
-                    break;
+                    // vorher mit Administratorrechten angelegte Aufgabe: nur als Administrator ersetzbar (wieder ohne Datei)
+                    if (err != null && Denied(err)) err = RegisterElevated(tn, xml, null, null);
                 }
-                case ScheduleKind.BeiAnmeldung:
-                    try
-                    {
-                        using (RegistryKey k = Registry.CurrentUser.CreateSubKey(RunKey))
-                            k.SetValue(RunValue(job), Command(job));
-                    }
-                    catch (Exception ex) { err = ex.Message; }
-                    break;
+                if (err == null) job.ScheduledTask = tn;
+            }
+            else if (!job.Disabled && job.Schedule == ScheduleKind.BeiAnmeldung)
+            {
+                try
+                {
+                    using (RegistryKey k = Registry.CurrentUser.CreateSubKey(RunKey))
+                        k.SetValue(RunValue(job), Command(job));
+                }
+                catch (Exception ex) { err = ex.Message; }
             }
             return err;
+        }
+
+        /// <summary>
+        /// Aufgabe mit Administratorrechten eintragen (Windows fragt nach, außer Sync Pilot läuft schon als Administrator):
+        /// PowerShell mit -EncodedCommand, die Aufgabenbeschreibung steht im Skript selbst. Das Skript schreibt sie unter
+        /// zufälligem Namen in %SystemRoot%\Temp (Dateien dort gehören den Administratoren), trägt sie mit schtasks.exe ein
+        /// und löscht sie wieder. Optional im selben Schritt: alte Aufgabe löschen und Prüfwert schreiben.
+        /// </summary>
+        static string RegisterElevated(string taskName, string xml, string oldTask, SyncJob seal)
+        {
+            string ps =
+                "$ErrorActionPreference = 'Stop'\r\n" +
+                "$xml = " + JobSeal.Ps(xml) + "\r\n" +
+                "$tn = " + JobSeal.Ps(taskName) + "\r\n" +
+                "$old = " + JobSeal.Ps(oldTask ?? "") + "\r\n" +
+                "$sch = Join-Path ([Environment]::SystemDirectory) 'schtasks.exe'\r\n" +
+                "try {\r\n" +
+                "  if ($old -ne '' -and $old -ne $tn) { try { & $sch /Delete /F /TN $old | Out-Null } catch {} }\r\n" +
+                "  $file = Join-Path (Join-Path $env:SystemRoot 'Temp') ('SyncPilot_' + [Guid]::NewGuid().ToString('N') + '.xml')\r\n" +
+                "  $fs = New-Object IO.FileStream($file, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)\r\n" +
+                "  try { $w = New-Object IO.StreamWriter($fs, [Text.Encoding]::Unicode); $w.Write($xml); $w.Flush() } finally { $fs.Dispose() }\r\n" +
+                "  try { & $sch /Create /F /TN $tn /XML $file | Out-Null; $rc = $LASTEXITCODE } finally { Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue }\r\n" +
+                "  if ($rc -ne 0) { exit $rc }\r\n" +
+                (seal != null ? JobSeal.Script(new[] { seal }) : "") +
+                "  exit 0\r\n" +
+                "} catch { exit 1 }";
+            int rc = JobSeal.RunElevated(ps);
+            if (rc == 0) return null;
+            if (rc == -1) return "F\u00fcr den Zeitplan mit Administratorrechten fehlt die Best\u00e4tigung von Windows.";
+            if (rc == -2) return "Windows PowerShell wurde nicht gefunden.";
+            return "schtasks.exe meldet Fehler " + rc + " (mit Administratorrechten)";
         }
 
         static readonly string[] DayNames = { "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday" };
@@ -221,7 +247,7 @@ namespace SyncPilot
         {
             try
             {
-                ProcessStartInfo psi = new ProcessStartInfo("schtasks.exe", args);
+                ProcessStartInfo psi = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "schtasks.exe"), args); // fester Pfad
                 psi.UseShellExecute = false;
                 psi.CreateNoWindow = true;
                 psi.RedirectStandardOutput = true;
