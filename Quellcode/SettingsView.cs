@@ -399,6 +399,14 @@ namespace SyncPilot
                 "Sync Pilot", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
+        /// <summary>Langen Pfad oder Befehl für die Vorschau kürzen (Mitte mit „…“).</summary>
+        static string Shorten(string text)
+        {
+            text = (text ?? "").Replace("\r", " ").Replace("\n", " ").Trim();
+            if (text.Length == 0) return "–";
+            return text.Length <= 70 ? text : text.Substring(0, 34) + " … " + text.Substring(text.Length - 32);
+        }
+
         void ImportJobs()
         {
             string file;
@@ -411,9 +419,10 @@ namespace SyncPilot
             }
             List<SyncJob> found;
             try { found = Store.ReadExport(file); }
-            catch (Exception)
+            catch (Exception ex)
             {
-                MessageBox.Show("Die Datei ist keine Aufgabenliste von Sync Pilot oder nicht lesbar.", "Sync Pilot", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(ex is InvalidDataException ? ex.Message : "Die Datei ist keine Aufgabenliste von Sync Pilot oder nicht lesbar.",
+                    "Sync Pilot", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
             // Doppelt ist, was es mit gleichem Namen in derselben Gruppe schon gibt (auch innerhalb der Datei)
@@ -428,30 +437,67 @@ namespace SyncPilot
                     : "Alle " + found.Count + " Aufgaben gibt es in Sync Pilot schon (gleicher Name und gleiche Gruppe).", "Sync Pilot", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
+            // Vorschau: Die Datei kann von außen kommen. Skripte und „Mit Administratorrechten ausführen“ werden
+            // hervorgehoben und nur mit eigenem Haken übernommen (Standard aus); Vorauswahl „Abbrechen“.
             StringBuilder sb = new StringBuilder();
             sb.AppendLine(fresh.Count + (fresh.Count == 1 ? " Aufgabe" : " Aufgaben") + " gefunden" +
                 (dup > 0 ? " (" + dup + " mit schon vorhandenem Namen werden ausgelassen)" : "") + ":");
             sb.AppendLine();
-            foreach (SyncJob j in fresh.Take(15))
+            foreach (SyncJob j in fresh.Take(10))
+            {
                 sb.AppendLine("• " + (string.IsNullOrWhiteSpace(j.Group) ? "" : j.Group + " › ") + j.Name + "  –  " + j.ModeText);
-            if (fresh.Count > 15) sb.AppendLine("• … und " + (fresh.Count - 15) + " weitere");
+                sb.AppendLine("   " + Shorten(j.FolderA) + "  ⇄  " + Shorten(j.FolderB));
+            }
+            if (fresh.Count > 10) sb.AppendLine("• … und " + (fresh.Count - 10) + " weitere");
+            List<SyncJob> risky = fresh.Where(j => j.RunAsAdmin || !string.IsNullOrWhiteSpace(j.ScriptBefore) || !string.IsNullOrWhiteSpace(j.ScriptAfter)).ToList();
+            if (risky.Count > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine("Achtung – " + (risky.Count == 1 ? "diese Aufgabe führt" : "diese Aufgaben führen") +
+                    " Befehle aus oder " + (risky.Count == 1 ? "läuft" : "laufen") + " mit Administratorrechten:");
+                foreach (SyncJob j in risky.Take(8))
+                {
+                    List<string> what = new List<string>();
+                    if (j.RunAsAdmin) what.Add("mit Administratorrechten");
+                    if (!string.IsNullOrWhiteSpace(j.ScriptBefore)) what.Add("vorher „" + Shorten(j.ScriptBefore) + "“");
+                    if (!string.IsNullOrWhiteSpace(j.ScriptAfter)) what.Add("nachher „" + Shorten(j.ScriptAfter) + "“");
+                    sb.AppendLine("• " + j.Name + ": " + string.Join(", ", what));
+                }
+                if (risky.Count > 8) sb.AppendLine("• … und " + (risky.Count - 8) + " weitere");
+                sb.AppendLine("Ohne Haken unten werden sie ohne Skripte und ohne Administratorrechte übernommen.");
+            }
             sb.AppendLine();
             sb.AppendLine("Der erste Lauf gleicht ab wie beim ersten Mal: Was nur auf einer Seite liegt, wird kopiert, " +
                 "nichts wird gelöscht. Bitte vorher „Analysieren“. Kennwörter bitte neu eintragen.");
 
             int auto = fresh.Count(j => !j.Disabled && (j.Schedule != ScheduleKind.Manuell || j.HasEvents));
-            bool asDisabled = false;
-            if (auto > 0)
+            bool asDisabled = false, keepRisky = false;
+            string question = auto > 0
+                ? "\n" + auto + (auto == 1 ? " Aufgabe startet" : " Aufgaben starten") + " von selbst (Zeitplan oder Ereignis).\n\n" +
+                  "Ja = so übernehmen, Zeitplan und Ereignisse sind gleich aktiv\n" +
+                  "Nein = diese Aufgaben deaktiviert übernehmen und später einzeln einschalten"
+                : "\nJetzt übernehmen?";
+            DialogResult answer;
+            using (MsgDialog d = new MsgDialog(sb.ToString() + question, "Sync Pilot",
+                auto > 0 ? MessageBoxButtons.YesNoCancel : MessageBoxButtons.OKCancel,
+                risky.Count > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Question,
+                auto > 0 ? MessageBoxDefaultButton.Button3 : MessageBoxDefaultButton.Button2,
+                risky.Count > 0 ? "Skripte und Administratorrechte übernehmen" : null))
             {
-                DialogResult r = MessageBox.Show(sb.ToString() + "\n" + auto + (auto == 1 ? " Aufgabe startet" : " Aufgaben starten") +
-                    " von selbst (Zeitplan oder Ereignis).\n\n" +
-                    "Ja = so übernehmen, Zeitplan und Ereignisse sind gleich aktiv\n" +
-                    "Nein = diese Aufgaben deaktiviert übernehmen und später einzeln einschalten",
-                    "Sync Pilot", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
-                if (r == DialogResult.Cancel) return;
-                asDisabled = r == DialogResult.No;
+                answer = d.Map(d.ShowDialog(FindForm()));
+                keepRisky = d.Checked;
             }
-            else if (MessageBox.Show(sb.ToString() + "\nJetzt übernehmen?", "Sync Pilot", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            if (answer == DialogResult.Cancel || answer == DialogResult.None) return;
+            asDisabled = answer == DialogResult.No;
+            int stripped = 0;
+            if (!keepRisky)
+                foreach (SyncJob j in risky)
+                {
+                    j.RunAsAdmin = false;
+                    j.ScriptBefore = null;
+                    j.ScriptAfter = null;
+                    stripped++;
+                }
 
             HashSet<string> ids = new HashSet<string>(Main.Jobs.Select(x => x.Id ?? ""), StringComparer.OrdinalIgnoreCase);
             List<string> errors = new List<string>();
@@ -471,6 +517,9 @@ namespace SyncPilot
             }
             Main.SaveJobs();
             string msg = fresh.Count + (fresh.Count == 1 ? " Aufgabe wurde" : " Aufgaben wurden") + " importiert.";
+            if (stripped > 0)
+                msg += "\n\nBei " + stripped + (stripped == 1 ? " Aufgabe wurden" : " Aufgaben wurden") +
+                    " Skripte und Administratorrechte weggelassen.";
             if (disabledNow > 0)
                 msg += "\n\n" + disabledNow + (disabledNow == 1 ? " davon ist" : " davon sind") + " deaktiviert" +
                     (AppSettings.Current.HideDisabled ? " und gerade ausgeblendet – in der Aufgabenliste über das Auge einblenden." : ".");

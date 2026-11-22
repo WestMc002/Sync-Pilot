@@ -925,7 +925,7 @@ namespace SyncPilot
             show = show && available != null;
             if (show)
             {
-                updateBar.Text = "Neue Version " + available.Version + " verfügbar – installiert ist " + AppInfo.Version + ".";
+                updateBar.SetAvailable(available.Version, AppInfo.Version);
                 string blocker = Updater.InstallBlocker();
                 // im Projektordner wird nie ersetzt: "Jetzt aktualisieren" öffnet dort die Release-Seite
                 updateBar.Install.Enabled = true;
@@ -1052,7 +1052,14 @@ namespace SyncPilot
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
-            if (Updater.InstallBlocker() != null) { if (!automatic) OpenReleasePage(); return; }
+            string blocker = Updater.InstallBlocker();
+            if (blocker == Updater.PendingText)
+            {
+                // früheres Update nicht abgeschlossen: erst die vorherige Version wiederherstellen (nur von Hand)
+                if (!automatic && Updater.OfferRepair(this, !Visible)) ExitForUpdate(false);
+                return;
+            }
+            if (blocker != null) { if (!automatic) OpenReleasePage(); return; }
             if (!automatic && MessageBox.Show(this, "Sync Pilot wird beendet, auf Version " + available.Version + " aktualisiert und neu gestartet. Einstellungen bleiben erhalten.",
                     "Update", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK)
                 return;
@@ -1068,11 +1075,7 @@ namespace SyncPilot
                     try { BeginInvoke(new Action(delegate { updateBar.Text = "Lade Version " + rel.Version + " … " + percent + " %"; })); } catch { }
                 }, hidden);
                 updateBar.Text = "Update wird installiert – Sync Pilot startet gleich neu.";
-                // ganz beenden (nicht nur in den Infobereich), damit das Hilfsskript die EXE ersetzen kann
-                exitRequested = true;
-                closeAfterCancel = false;
-                if (!Visible) { if (automatic) startHidden = true; Show(); } // automatisch: Fenster nicht aufblitzen lassen
-                Close();
+                ExitForUpdate(automatic);
             }
             catch (Exception ex)
             {
@@ -1093,7 +1096,17 @@ namespace SyncPilot
             finally { updating = false; }
         }
 
-        // nach dem Neustart durch das Hilfsskript: Ergebnis zeigen
+        /// <summary>Ganz beenden (nicht nur in den Infobereich), damit das Hilfsskript die EXE ersetzen kann.</summary>
+        void ExitForUpdate(bool automatic)
+        {
+            exitRequested = true;
+            closeAfterCancel = false;
+            if (!Visible) { if (automatic) startHidden = true; Show(); } // automatisch: Fenster nicht aufblitzen lassen
+            Close();
+        }
+
+        // nach dem Neustart durch das Hilfsskript: Ergebnis zeigen. Meldungen ohne Pfade und Technik, die Einzelheiten
+        // stehen im Fehlerprotokoll (Protokollordner, Update-Fehler.txt).
         void ShowUpdateResult()
         {
             if (!AfterUpdate) return;
@@ -1104,10 +1117,16 @@ namespace SyncPilot
             {
                 string v = result.Substring(2).Trim();
                 if (tray != null) { balloonIsUpdate = false; tray.ShowBalloonTip(6000, "Sync Pilot", "Update auf Version " + v + " installiert.", ToolTipIcon.Info); }
+                return;
             }
-            else
-                MessageBox.Show(this, "Das Update ist fehlgeschlagen: " + result.Replace("FEHLER", "").Trim() + "\r\n\r\nDie bisherige Version läuft weiter.",
-                    "Update", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            Updater.ErrorLog(result);
+            if (result.StartsWith("ZURUECK"))
+            {
+                if (tray != null) { balloonIsUpdate = false; tray.ShowBalloonTip(6000, "Sync Pilot", "Vorherige Version wiederhergestellt.", ToolTipIcon.Info); }
+                return;
+            }
+            MessageBox.Show(this, "Update nicht installiert – die bisherige Version läuft weiter. Einzelheiten stehen im Fehlerprotokoll.",
+                "Update", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
 
         // Automatisch (bei einem Ereignis) gestarteter Lauf ist fertig: Ansicht auffrischen, Fehler melden

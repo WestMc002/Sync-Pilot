@@ -334,6 +334,12 @@ Aufgaben exportieren und importieren
   Ereignis-Start lassen sich aktiv oder deaktiviert übernehmen. Der erste
   Lauf gleicht ab wie beim ersten Mal (nichts wird gelöscht). Die ID bleibt
   erhalten, wenn sie frei ist – Aufrufe mit /run gehen dann weiter.
+  Vor dem Übernehmen zeigt Sync Pilot die Aufgaben. Befehle vor/nach dem
+  Kopieren und "Mit Administratorrechten ausführen" werden hervorgehoben und
+  nur mit dem Haken "Skripte und Administratorrechte übernehmen" übernommen
+  (Standard aus). Bestätigte Server-Zertifikate und -Schlüssel (FTPS, SFTP)
+  werden nicht übernommen – beim Verbinden in der Aufgabe neu bestätigen,
+  zusammen mit dem Kennwort. Die Datei darf höchstens 16 MB groß sein.
 
 Administratorrechte
   Befehle vor/nach dem Kopieren wie "net stop" brauchen Administratorrechte.
@@ -470,8 +476,14 @@ Updates
     mit normalen Rechten neu (mit "Immer als Administrator starten" wieder als
     Administrator). Aufgaben, Einstellungen, Stand und
     Verlauf (%LOCALAPPDATA%\Sync Pilot) bleiben erhalten. Läuft gerade ein
-    Abgleich nach Zeitplan, wartet das Update, bis er fertig ist. Schlägt das
-    Ersetzen fehl, bleibt die bisherige Version und Sync Pilot meldet es.
+    Abgleich nach Zeitplan, wartet das Update, bis er fertig ist. Die neuen
+    Dateien werden erst vollständig geschrieben und dann in einem Schritt
+    ausgetauscht. Schlägt das fehl, setzt das Update die bisherigen Dateien
+    zurück; Sync Pilot meldet "Update nicht installiert" und schreibt die
+    Einzelheiten ins Fehlerprotokoll (Info-Fenster > Protokolle, Datei
+    "Update-Fehler.txt"). Wurde ein Update nicht abgeschlossen (z. B. Strom
+    weg), bietet Sync Pilot beim nächsten Update an, die vorherige Version
+    wiederherzustellen.
     "Release-Seite" öffnet die Seite im Browser, "Später" blendet den Hinweis
     bis zur nächsten Prüfung aus. Das Fenster wird dabei um die Leiste
     größer, soweit der Bildschirm reicht.

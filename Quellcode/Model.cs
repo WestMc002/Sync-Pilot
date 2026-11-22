@@ -624,16 +624,25 @@ namespace SyncPilot
             Write(file, f);
         }
 
-        /// <summary>Exportierte Aufgaben lesen (ohne Kennwörter und ohne Verweis auf eine geplante Aufgabe).</summary>
+        /// <summary>
+        /// Exportierte Aufgaben lesen (ohne Kennwörter, ohne Verweis auf eine geplante Aufgabe und ohne bestätigte
+        /// Server-Zertifikate). Die Datei kann von außen kommen: höchstens 16 MB und 5000 Aufgaben.
+        /// </summary>
         public static List<SyncJob> ReadExport(string file)
         {
-            List<SyncJob> list = Read<JobFile>(file).Jobs;
+            if (new FileInfo(file).Length > 16L * 1024 * 1024) throw new InvalidDataException("Die Datei ist zu groß.");
+            List<SyncJob> list = Read<JobFile>(file).Jobs ?? new List<SyncJob>();
+            if (list.Count > 5000) throw new InvalidDataException("Die Datei enthält zu viele Aufgaben.");
+            list.RemoveAll(j => j == null);
             foreach (SyncJob j in list)
             {
                 j.Upgrade();
                 j.PassA = null;
                 j.PassB = null;
                 j.ScheduledTask = null;
+                // ein mitgebrachter Fingerabdruck würde ein fremdes Server-Zertifikat ungefragt anerkennen
+                j.CertA = null;
+                j.CertB = null;
             }
             return list;
         }
