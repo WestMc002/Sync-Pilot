@@ -576,8 +576,9 @@ Hintergrund und Handy-Zugriff (Seite "Einstellungen")
   EXE und die Netzwerke "Privat" und "Domäne"; ohne "Auch aus dem Internet"
   nur für Heimnetz- und VPN-Adressen. Die Anzeige meldet, wenn die Regel von
   Hand geändert wurde und weiter reicht (dann erneut "Freigeben ..."), und
-  nach dem Umschalten von "Auch aus dem Internet". Tipp: "Zum Startbildschirm
-  hinzufügen".
+  nach dem Umschalten von "Auch aus dem Internet". Ist eine andere Firewall
+  aktiv (z. B. ESET), nennt die Anzeige sie: Dort muss der Port für Sync Pilot
+  freigegeben werden. Tipp: "Zum Startbildschirm hinzufügen".
 
 Kommandozeile
   "Sync Pilot.exe" /run <Name oder ID>          z. B. /run "Replikation 2"

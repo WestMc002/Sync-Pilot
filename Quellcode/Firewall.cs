@@ -39,6 +39,17 @@ namespace SyncPilot
         /// <summary>null = alles in Ordnung (oder nicht prüfbar), sonst eine kurze Beschreibung des Problems.</summary>
         public static string Problem(int port)
         {
+            bool active;
+            return Problem(port, out active);
+        }
+
+        /// <summary>
+        /// Wie Problem(port); windowsActive = die Windows-Firewall ist für mindestens ein aktuelles Netzwerk eingeschaltet
+        /// (bei einer anderen Firewall wie ESET meist aus).
+        /// </summary>
+        public static string Problem(int port, out bool windowsActive)
+        {
+            windowsActive = false;
             try
             {
                 Type t = Type.GetTypeFromProgID("HNetCfg.FwPolicy2");
@@ -53,6 +64,7 @@ namespace SyncPilot
                     if (on is bool && (bool)on) active = true;
                 }
                 if (!active) return null; // Windows-Firewall aus (z. B. anderes Firewall-Programm)
+                windowsActive = true;
                 // alle Regeln dieses Namens prüfen (von Hand angelegte Doppel eingeschlossen): jede muss passen
                 List<object> rules = new List<object>();
                 foreach (dynamic r in policy.Rules)
@@ -104,9 +116,34 @@ namespace SyncPilot
                 if (!OnlyLocal(remote)) return "!Die Firewall-Freigabe gilt auch für Adressen aus dem Internet – bitte neu anlegen";
             }
             else if (remote != "*") return "Die Firewall-Freigabe gilt nur für das Heimnetz – für den Zugriff aus dem Internet bitte neu anlegen";
-            if ((current & ProfilePublic) != 0)
+            // CurrentProfileTypes enthält die Profile aller Verbindungen: Ein öffentlich eingestufter Zusatzadapter
+            // (VPN, Hyper-V, nicht erkanntes Netz) setzt „Öffentlich“ mit. Nur warnen, wenn kein Netz privat bzw. Domäne ist.
+            if ((current & (ProfilePrivate | ProfileDomain)) == 0)
                 return "Das Netzwerk ist in Windows als „Öffentlich“ eingestuft – bitte auf „Privat“ umstellen";
             return null;
+        }
+
+        /// <summary>
+        /// Name einer bei Windows angemeldeten Firewall eines anderen Herstellers (z. B. ESET), sonst null. Sie verwaltet
+        /// eingehende Verbindungen dann selbst; die Windows-Regel genügt nicht unbedingt.
+        /// </summary>
+        public static string ThirdParty()
+        {
+            try
+            {
+                Type t = Type.GetTypeFromProgID("HNetCfg.FwProducts");
+                if (t == null) return null;
+                dynamic products = Activator.CreateInstance(t);
+                int n = products.Count;
+                List<string> names = new List<string>();
+                for (int i = 0; i < n; i++)
+                {
+                    string name = products.Item(i).DisplayName;
+                    if (!string.IsNullOrWhiteSpace(name) && !names.Contains(name.Trim())) names.Add(name.Trim());
+                }
+                return names.Count == 0 ? null : string.Join(", ", names);
+            }
+            catch { return null; }
         }
 
         /// <summary>Liegt jeder Eintrag der Remote-Adressen ganz in den Heimnetz-/VPN-Bereichen? Unbekanntes zählt als nein.</summary>

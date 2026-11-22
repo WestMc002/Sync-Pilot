@@ -1313,15 +1313,32 @@ namespace SyncPilot
             LayoutAll();
             ThreadPool.QueueUserWorkItem(delegate
             {
-                string problem = Firewall.Problem(p);
+                bool windowsActive;
+                string problem = Firewall.Problem(p, out windowsActive);
+                string other = Firewall.ThirdParty();
+                string text, hint = null;
+                if (other != null && !windowsActive)
+                {
+                    // Windows-Firewall aus, eine andere Firewall (z. B. ESET) übernimmt
+                    text = "Die Firewall von „" + other + "“ ist aktiv. Bitte dort eingehende Verbindungen auf TCP-Port " + p + " für Sync Pilot erlauben" +
+                           (AppSettings.Current.WebInternet && AppSettings.Current.WebHttps ? "." : " (nur Heimnetz).");
+                    problem = null;
+                    hint = text;
+                }
+                else
+                {
+                    text = problem == null ? "Port " + p + " ist freigegeben." : problem + ".";
+                    if (other != null)
+                        text += " Zusätzlich ist die Firewall von „" + other + "“ aktiv – dort ggf. TCP-Port " + p + " für Sync Pilot freigeben.";
+                }
                 if (IsDisposed || !IsHandleCreated) return;
                 try
                 {
                     BeginInvoke(new Action(delegate
                     {
                         if (run != firewallRun) return;
-                        firewall.Text = problem == null ? "Port " + p + " ist freigegeben." : problem + ".";
-                        firewall.ForeColor = problem == null ? Theme.Ok : Theme.Warn;
+                        firewall.Text = text;
+                        firewall.ForeColor = problem != null ? Theme.Warn : hint != null || other != null ? Theme.TextDim : Theme.Ok;
                         btnFirewall.Enabled = problem != null;
                         LayoutAll();
                     }));
