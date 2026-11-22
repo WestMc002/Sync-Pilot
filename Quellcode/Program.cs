@@ -25,7 +25,7 @@ namespace SyncPilot
         //   "Sync Pilot.exe" /run <ID|Name|Gruppe\Name>   Aufgabe ohne Fenster ausfuehren (Zeitplan)
         //   "Sync Pilot.exe" /runall          alle Aufgaben ohne Fenster ausfuehren
         //   Rueckgabewert: 0 OK, 1 Fehler/Abbruch, 2 nicht gefunden, 3 Aufgaben nicht lesbar, 4 deaktiviert, 5 offline ausgelassen
-        //   "Sync Pilot.exe" --nach-update    vom Update-Hilfsskript nach dem Ersetzen der EXE
+        //   "Sync Pilot.exe" --nach-update [Versuch]  vom Update-Hilfsskript nach dem Ersetzen der EXE
         //   "Sync Pilot.exe" /sync <ID|Name>  Oberflaeche oeffnen, Aufgabe analysieren und synchronisieren (Verknuepfung)
         //   "Sync Pilot.exe" --screenshots [Zielordner]   Screenshots fuer GitHub aus Beispieldaten
         //   "Sync Pilot.exe" /tray            unsichtbar im Infobereich starten (Autostart)
@@ -36,6 +36,8 @@ namespace SyncPilot
         [STAThread]
         static int Main(string[] args)
         {
+            // vor jedem Dateizugriff: Pfade über 260 Zeichen erlauben (siehe LongPath)
+            LongPath.Enable();
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             // Laufzeitdaten einmalig von %APPDATA% nach %LOCALAPPDATA% übernehmen (gilt auch für Läufe ohne Fenster)
@@ -79,7 +81,13 @@ namespace SyncPilot
                 Elevation.Restart(Elevation.JoinArgs(args)))
                 return 0;
             // Neustart durch das Update-Hilfsskript: Ergebnis zeigen
-            if (args.Any(x => x.Equals("--nach-update", StringComparison.OrdinalIgnoreCase))) MainForm.AfterUpdate = true;
+            // ab 1.99 mit Versuchskennung (32 Hex-Zeichen) direkt dahinter: Ergebnis genau dieses Versuchs
+            int afterUpdate = Array.FindIndex(args, x => x.Equals("--nach-update", StringComparison.OrdinalIgnoreCase));
+            if (afterUpdate >= 0)
+            {
+                MainForm.AfterUpdate = true;
+                if (afterUpdate + 1 < args.Length && Updater.IsAttemptId(args[afterUpdate + 1])) MainForm.AfterUpdateAttempt = args[afterUpdate + 1];
+            }
 
             // Nur eine Oberfläche: ein zweiter Start holt das laufende Fenster nach vorn
             bool first;

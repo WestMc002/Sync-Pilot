@@ -106,6 +106,8 @@ namespace SyncPilot
         bool updating;
         /// <summary>Gesetzt beim Neustart nach einem Update (--nach-update).</summary>
         public static bool AfterUpdate;
+        /// <summary>Versuchskennung aus --nach-update (ab 1.99), sonst null.</summary>
+        public static string AfterUpdateAttempt;
         readonly InputBox search;
         BaseView current;
         bool closeAfterCancel;
@@ -1052,6 +1054,7 @@ namespace SyncPilot
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
+            Updater.QuietCleanup();
             string blocker = Updater.InstallBlocker();
             if (blocker == Updater.PendingText)
             {
@@ -1111,7 +1114,7 @@ namespace SyncPilot
         {
             if (!AfterUpdate) return;
             AfterUpdate = false;
-            string result = Updater.LastResult();
+            string result = Updater.LastResult(AfterUpdateAttempt);
             if (result == null) return;
             if (result.StartsWith("OK"))
             {

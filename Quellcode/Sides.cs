@@ -35,6 +35,58 @@ namespace SyncPilot
         bool HidesDotFiles { get; }
     }
 
+    /// <summary>
+    /// Pfade über 260 Zeichen: Das Programm schaltet beim Start die alte Pfadbehandlung von .NET ab (Program.Main,
+    /// LongPath.Enable). Windows selbst braucht für lange Pfade das Präfix \\?\ (bzw. \\?\UNC\ bei Freigaben), solange
+    /// lange Pfade nicht systemweit eingeschaltet sind – Fix() setzt es nur, wo es nötig ist.
+    /// </summary>
+    public static class LongPath
+    {
+        /// <summary>Ab dieser Länge wird das Präfix gesetzt (Ordner dürfen ohne Präfix höchstens 247 Zeichen haben).</summary>
+        public const int Limit = 248;
+        /// <summary>Länge, ab der andere Programme (Explorer, Office) den Pfad meist nicht mehr öffnen können.</summary>
+        public const int Classic = 260;
+
+        public static bool Enabled { get; private set; }
+
+        /// <summary>Alte Pfadbehandlung von .NET abschalten (nur ab .NET 4.6.2, sonst bleibt alles wie bisher).</summary>
+        public static void Enable()
+        {
+            try
+            {
+                Type ctx = Type.GetType("System.AppContext");
+                if (ctx == null) return;
+                System.Reflection.MethodInfo set = ctx.GetMethod("SetSwitch", new Type[] { typeof(string), typeof(bool) });
+                if (set == null) return;
+                set.Invoke(null, new object[] { "Switch.System.IO.UseLegacyPathHandling", false });
+                set.Invoke(null, new object[] { "Switch.System.IO.BlockLongPaths", false });
+                Enabled = true;
+            }
+            catch { }
+        }
+
+        /// <summary>Langen, vollständigen Pfad mit \\?\ versehen; kurze Pfade bleiben unverändert.</summary>
+        public static string Fix(string path)
+        {
+            if (!Enabled || path == null || path.Length < Limit || path.StartsWith(@"\\?\", StringComparison.Ordinal)) return path;
+            if (path.StartsWith(@"\\", StringComparison.Ordinal)) return @"\\?\UNC\" + path.Substring(2);
+            if (path.Length > 2 && path[1] == ':' && path[2] == '\\') return @"\\?\" + path;
+            return path;
+        }
+
+        /// <summary>Für Anzeige und Protokoll: Präfix wieder weglassen.</summary>
+        public static string Show(string path)
+        {
+            if (path == null) return null;
+            if (path.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase)) return @"\\" + path.Substring(8);
+            if (path.StartsWith(@"\\?\", StringComparison.Ordinal)) return path.Substring(4);
+            return path;
+        }
+
+        /// <summary>Hat der Pfad (ohne Präfix) 260 Zeichen oder mehr?</summary>
+        public static bool IsLong(string path) { return path != null && Show(path).Length >= Classic; }
+    }
+
     public static class Sides
     {
         public static IFileSide Open(SyncJob job, bool sideA)
@@ -142,9 +194,21 @@ namespace SyncPilot
 
         public LocalSide(string root, string label)
         {
+            // vollständiger, normalisierter Pfad: Das Präfix \\?\ für lange Pfade setzt keine weitere Normalisierung voraus
+            if (!string.IsNullOrEmpty(root) && root.IndexOf('%') < 0 && Path.IsPathRooted(root))
+                try
+                {
+                    string full = Path.GetFullPath(root);
+                    if (full.Length > 3) full = full.TrimEnd('\\');
+                    root = full;
+                }
+                catch { }
             this.root = root;
             this.label = label;
         }
+
+        /// <summary>Pfad (ohne Präfix) eines Eintrags auf dieser Seite – für den Hinweis auf lange Pfade.</summary>
+        public string Plain(string rel) { return rel.Length == 0 ? root : Path.Combine(root, rel); }
 
         public string Display { get { return root; } }
         public bool IsRemote { get { return false; } }
@@ -152,9 +216,9 @@ namespace SyncPilot
 
         public string Full(string rel)
         {
-            if (rel.Length == 0) return root;
+            if (rel.Length == 0) return LongPath.Fix(root);
             Sides.CheckRel(rel); // nie außerhalb des Sync-Ordners zugreifen
-            string full = Path.Combine(root, rel);
+            string full = LongPath.Fix(Path.Combine(root, rel));
             if (Elevation.IsAdmin) CheckNoLinks(rel);
             return full;
         }
@@ -172,10 +236,13 @@ namespace SyncPilot
             {
                 p = Path.Combine(p, seg);
                 FileAttributes at;
-                try { at = File.GetAttributes(p); }
+                string lp = LongPath.Fix(p);
+                try { at = File.GetAttributes(lp); }
                 catch (FileNotFoundException) { return; }      // Rest gibt es noch nicht (wird neu angelegt)
                 catch (DirectoryNotFoundException) { return; }
-                if ((at & FileAttributes.ReparsePoint) != 0 && Reparse.IsLink(p))
+                // zu langer Pfad (über 260 Zeichen): Der eigentliche Zugriff scheitert genauso und wird je Datei gemeldet
+                catch (PathTooLongException) { return; }
+                if ((at & FileAttributes.ReparsePoint) != 0 && Reparse.IsLink(lp))
                     throw new SyncException("Verknüpfung im Sync-Ordner abgelehnt (könnte Zugriffe mit Administratorrechten umleiten): " + p);
             }
         }
@@ -183,7 +250,7 @@ namespace SyncPilot
         public void CheckRoot()
         {
             if (string.IsNullOrEmpty(root)) throw new SyncException("Ordner " + label + " ist nicht angegeben.");
-            if (Directory.Exists(root)) return;
+            if (Directory.Exists(LongPath.Fix(root))) return;
             // Directory.Exists sagt nur "nein" – den eigentlichen Grund ermitteln (Rechner aus, Freigabe fehlt, kein Zugriff, Unterordner fehlt)
             string why = Diagnose(root);
             throw new SyncException("Ordner " + label + " nicht erreichbar: " + root + (why != null ? " \u2013 " + why : ""));
@@ -242,14 +309,16 @@ namespace SyncPilot
             {
                 if (cancel()) throw new OperationCanceledException();
                 string rel = stack.Pop();
-                string full = Full(rel);
+                string full = rel.Length == 0 ? root : Path.Combine(root, rel);
                 FileSystemInfo[] infos;
-                try { infos = new DirectoryInfo(full).GetFileSystemInfos(); }
+                // Full() prüft (mit Adminrechten) auch Verknüpfungen im Pfad – ein Fehler dabei betrifft nur diesen
+                // Unterordner (z. B. Pfad zu lang), nicht den ganzen Abgleich
+                try { full = Full(rel); infos = new DirectoryInfo(full).GetFileSystemInfos(); }
                 catch (Exception ex)
                 {
                     if (rel.Length == 0) throw new SyncException("Ordner " + label + " nicht lesbar: " + root + " (" + ex.Message + ")");
                     unreadable.Add(rel);
-                    errors.Add("Nicht lesbar: " + full + " (" + ex.Message + ")");
+                    errors.Add("Nicht lesbar: " + LongPath.Show(full) + " (" + ex.Message + ")");
                     continue;
                 }
                 foreach (FileSystemInfo fi in infos)
@@ -276,13 +345,13 @@ namespace SyncPilot
                         FileInfo f = (FileInfo)fi;
                         // Symbolische Links auf Dateien nicht abgleichen: Schreiben/Löschen träfe sonst das Ziel, das außerhalb
                         // des Sync-Ordners liegen kann (Cloud-Dateien wie OneDrive bleiben normale Dateien)
-                        if ((at & FileAttributes.ReparsePoint) != 0 && Reparse.IsLink(f.FullName))
+                        if ((at & FileAttributes.ReparsePoint) != 0 && Reparse.IsLink(LongPath.Fix(f.FullName)))
                         {
                             unreadable.Add(r);
                             continue;
                         }
                         try { result[r] = new FileEntry { Rel = r, Size = f.Length, Mtime = f.LastWriteTimeUtc }; }
-                        catch (Exception ex) { errors.Add("Nicht lesbar: " + f.FullName + " (" + ex.Message + ")"); unreadable.Add(r); }
+                        catch (Exception ex) { errors.Add("Nicht lesbar: " + LongPath.Show(f.FullName) + " (" + ex.Message + ")"); unreadable.Add(r); }
                     }
                     count++;
                     if ((count & 511) == 0) progress(count);

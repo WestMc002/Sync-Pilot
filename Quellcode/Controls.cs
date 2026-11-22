@@ -811,8 +811,10 @@ namespace SyncPilot
         {
             try
             {
-                if (select) System.Diagnostics.Process.Start("explorer.exe", "/select,\"" + path + "\"");
-                else System.Diagnostics.Process.Start("explorer.exe", "\"" + path + "\"");
+                // Explorer nur über den festen Pfad, nie über den Suchpfad
+                string explorer = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
+                if (select) System.Diagnostics.Process.Start(explorer, "/select,\"" + path + "\"");
+                else System.Diagnostics.Process.Start(explorer, "\"" + path + "\"");
             }
             catch (Exception ex)
             {

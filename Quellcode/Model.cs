@@ -624,6 +624,15 @@ namespace SyncPilot
             Write(file, f);
         }
 
+        /// <summary>Zeilenumbrüche und Steuerzeichen durch Leerzeichen ersetzen.</summary>
+        static string NoControl(string text)
+        {
+            if (text == null) return null;
+            StringBuilder sb = new StringBuilder(text.Length);
+            foreach (char c in text) sb.Append(char.IsControl(c) ? ' ' : c);
+            return sb.ToString().Trim();
+        }
+
         /// <summary>
         /// Exportierte Aufgaben lesen (ohne Kennwörter, ohne Verweis auf eine geplante Aufgabe und ohne bestätigte
         /// Server-Zertifikate). Die Datei kann von außen kommen: höchstens 16 MB und 5000 Aufgaben.
@@ -634,8 +643,20 @@ namespace SyncPilot
             List<SyncJob> list = Read<JobFile>(file).Jobs ?? new List<SyncJob>();
             if (list.Count > 5000) throw new InvalidDataException("Die Datei enthält zu viele Aufgaben.");
             list.RemoveAll(j => j == null);
+            // doppelte Kennungen schon vor der Vorschau ablehnen; die Kennung wird Teil von Dateinamen (Abgleichstand,
+            // geplante Aufgabe) und kommt deshalb nur in der erwarteten Form an (32 Hex-Zeichen), sonst neu vergeben
+            HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (SyncJob j in list)
             {
+                if (string.IsNullOrEmpty(j.Id)) continue;
+                if (!seen.Add(j.Id)) throw new InvalidDataException("Die Datei enthält mehrere Aufgaben mit derselben Kennung.");
+            }
+            foreach (SyncJob j in list)
+            {
+                if (j.Id != null && !System.Text.RegularExpressions.Regex.IsMatch(j.Id, "^[0-9a-f]{32}$")) j.Id = null;
+                // Namen ohne Zeilenumbrüche und Steuerzeichen (erscheinen in Protokollzeilen und Aufgabennamen)
+                j.Name = NoControl(j.Name);
+                j.Group = NoControl(j.Group);
                 j.Upgrade();
                 j.PassA = null;
                 j.PassB = null;

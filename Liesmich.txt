@@ -433,6 +433,13 @@ Sicherheitsnetz
   - Was auf einer Seite nicht lesbar oder versteckt ist, gilt nie als gelöscht.
   - Auf Netzlaufwerken gibt es keinen Papierkorb; dort wird endgültig gelöscht
     (steht im Protokoll).
+  - Pfade mit 260 oder mehr Zeichen gleicht Sync Pilot ab (lokal und auf
+    Freigaben). Die Analyse zeigt dazu den Hinweis "lange Pfade" (Klick zeigt
+    die Liste), das Protokoll ebenso: Der Explorer und viele andere Programme
+    können solche Dateien oft nicht öffnen. In den Papierkorb lassen sie sich
+    nicht verschieben – Sync Pilot löscht sie dann nicht, sondern meldet einen
+    Fehler (von Hand löschen oder "Endgültig löschen" wählen). Am besten Ordner-
+    oder Dateinamen kürzen.
   - Gespeicherter Stand beschädigt: Sync Pilot nimmt die Sicherung vom
     vorletzten Lauf (Status\<ID>.state.bak). Fehlen beide oder sind beide
     beschädigt, obwohl die Aufgabe schon synchronisiert wurde, werden Dateien
@@ -565,7 +572,12 @@ Hintergrund und Handy-Zugriff (Seite "Einstellungen")
   sehen ist, höchstens 10 Minuten, wird von selbst erneuert); danach bleibt es 30 Tage angemeldet. Ohne Kamera den Link
   öffnen und das Kennwort eingeben. Darunter: Status und Windows-Firewall mit
   "Freigeben ..." (legt die Regel "Sync Pilot (Handy)" an, fragt nach
-  Administratorrechten). Tipp: "Zum Startbildschirm hinzufügen".
+  Administratorrechten). Die Regel gilt nur für TCP, diesen Port, genau diese
+  EXE und die Netzwerke "Privat" und "Domäne"; ohne "Auch aus dem Internet"
+  nur für Heimnetz- und VPN-Adressen. Die Anzeige meldet, wenn die Regel von
+  Hand geändert wurde und weiter reicht (dann erneut "Freigeben ..."), und
+  nach dem Umschalten von "Auch aus dem Internet". Tipp: "Zum Startbildschirm
+  hinzufügen".
 
 Kommandozeile
   "Sync Pilot.exe" /run <Name oder ID>          z. B. /run "Replikation 2"

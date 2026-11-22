@@ -9,6 +9,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -20,6 +21,31 @@ namespace SyncPilot
         readonly bool autoSync;
         readonly FlatButton btnBack, btnRe, btnSync, btnClose, btnLog, btnCancel;
         readonly Label title, status, sum1, sum2;
+        readonly ModernToolTip statusTip = new ModernToolTip();
+        List<string> scanErrors, longPaths;
+
+        /// <summary>Nicht lesbare Einträge und Hinweis auf lange Pfade für Tooltip bzw. Meldung.</summary>
+        string ScanErrorText(int max)
+        {
+            StringBuilder sb = new StringBuilder();
+            if (scanErrors != null)
+            {
+                sb.Append(scanErrors.Count == 1 ? "Ein Eintrag war nicht lesbar:" : scanErrors.Count + " Einträge waren nicht lesbar:");
+                foreach (string e in scanErrors.Take(max)) sb.Append("\n• ").Append(e);
+                if (scanErrors.Count > max) sb.Append("\n• … und ").Append(scanErrors.Count - max).Append(" weitere");
+                sb.Append("\nNicht lesbare Einträge werden nicht abgeglichen und nie als gelöscht gewertet.");
+            }
+            if (longPaths != null)
+            {
+                if (sb.Length > 0) sb.Append("\n\n");
+                sb.Append(longPaths.Count == 1 ? "Ein Eintrag hat" : longPaths.Count + " Einträge haben").Append(" einen Pfad mit 260 oder mehr Zeichen:");
+                foreach (string e in longPaths.Take(max)) sb.Append("\n• ").Append(e);
+                if (longPaths.Count > max) sb.Append("\n• … und ").Append(longPaths.Count - max).Append(" weitere");
+                sb.Append("\nSync Pilot gleicht sie ab. Der Explorer und viele andere Programme können so lange Pfade aber oft nicht öffnen, " +
+                          "und in den Papierkorb lassen sie sich nicht verschieben (Löschen dann nur endgültig). Am besten Ordner- oder Dateinamen kürzen.");
+            }
+            return sb.ToString();
+        }
         readonly Card summary, listCard, errCard;
         readonly Label errTitle, errText;
         readonly FlatButton errRetry;
@@ -59,6 +85,12 @@ namespace SyncPilot
             title = Ui.Label(job.Name, Theme.H1, Theme.Text, Theme.Bg);
             status = Ui.WrapLabel("", Theme.Body, Theme.TextDim, Theme.Bg);
             status.AutoEllipsis = true;
+            // nicht lesbare Einträge: Klick bzw. Tooltip zeigt, welche es sind (stehen sonst nur im Protokoll eines Laufs)
+            status.Click += delegate
+            {
+                if (scanErrors == null && longPaths == null) return;
+                MessageBox.Show(FindForm(), ScanErrorText(30), "Sync Pilot", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            };
             btnRe = new FlatButton("Neu analysieren", Theme.GRefresh, BtnKind.Secondary);
             btnRe.Click += delegate { resultMsg = null; StartAnalysis(false); };
 
@@ -575,8 +607,15 @@ namespace SyncPilot
             else
             {
                 info = "Analyse abgeschlossen · " + Fmt.Duration(an.Seconds);
-                if (an.ScanErrors.Count > 0) info += " · " + an.ScanErrors.Count + " Einträge nicht lesbar";
+                if (an.ScanErrors.Count > 0) info += " · " + an.ScanErrors.Count + (an.ScanErrors.Count == 1 ? " Eintrag" : " Einträge") + " nicht lesbar";
+                if (an.LongPaths.Count > 0) info += " · " + an.LongPaths.Count + (an.LongPaths.Count == 1 ? " langer Pfad" : " lange Pfade");
+                if (an.ScanErrors.Count > 0 || an.LongPaths.Count > 0) info += " – Details";
             }
+            scanErrors = error == null && an != null && an.ScanErrors.Count > 0 ? an.ScanErrors : null;
+            longPaths = error == null && an != null && an.LongPaths.Count > 0 ? an.LongPaths : null;
+            bool details = scanErrors != null || longPaths != null;
+            status.Cursor = details ? Cursors.Hand : Cursors.Default;
+            statusTip.SetToolTip(status, details ? ScanErrorText(8) + "\n\nKlicken für die ganze Liste." : null);
             if (resultMsg != null) info = resultMsg + "  ·  " + info;
             status.Text = info;
             status.ForeColor = (error != null || resultBad) ? Theme.Err : Theme.TextDim;

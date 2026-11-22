@@ -721,7 +721,7 @@ namespace SyncPilot
             catch
             {
                 if (notepadFallback)
-                    try { System.Diagnostics.Process.Start("notepad.exe", "\"" + path + "\""); } catch { }
+                    try { System.Diagnostics.Process.Start(System.IO.Path.Combine(Environment.SystemDirectory, "notepad.exe"), "\"" + path + "\""); } catch { }
             }
         }
     }

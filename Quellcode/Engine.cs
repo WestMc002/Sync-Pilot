@@ -142,6 +142,8 @@ namespace SyncPilot
         public List<PlanItem> All = new List<PlanItem>();
         public List<PlanItem> Actions = new List<PlanItem>();
         public List<string> ScanErrors = new List<string>();
+        /// <summary>Einträge mit Pfad ab 260 Zeichen (auf einer der beiden lokalen Seiten): werden abgeglichen, aber Hinweis.</summary>
+        public List<string> LongPaths = new List<string>();
         public int FilesA, FilesB;
         public long BytesA, BytesB;
         public double Seconds;
@@ -491,6 +493,9 @@ namespace SyncPilot
 
         public static void Send(string path)
         {
+            // Der Papierkorb (Shell) kann keine Pfade über 260 Zeichen: lieber nicht löschen als endgültig löschen
+            if (path.StartsWith(@"\\?\", StringComparison.Ordinal) || path.Length >= LongPath.Classic)
+                throw new IOException("Pfad zu lang für den Papierkorb (über 260 Zeichen) – nicht gelöscht. Bitte von Hand löschen oder für diese Aufgabe „Endgültig löschen“ wählen.");
             SHFILEOPSTRUCT op = new SHFILEOPSTRUCT();
             op.wFunc = FO_DELETE;
             op.pFrom = path + "\0\0";
@@ -611,6 +616,11 @@ namespace SyncPilot
                 // Positivliste: nur passende Dateien und Ordner abgleichen (auf beiden Seiten gleich angewendet)
                 a = m.ApplyIncludes(a);
                 b = m.ApplyIncludes(b);
+                // Hinweis auf Pfade ab 260 Zeichen: Sync Pilot gleicht sie ab, viele andere Programme können sie nicht öffnen
+                LocalSide la = sa as LocalSide, lb = sb as LocalSide;
+                foreach (string rel in a.Keys.Concat(b.Keys).Distinct(StringComparer.OrdinalIgnoreCase))
+                    if ((la != null && LongPath.IsLong(la.Plain(rel))) || (lb != null && LongPath.IsLong(lb.Plain(rel)))) an.LongPaths.Add(rel);
+                an.LongPaths.Sort(StringComparer.OrdinalIgnoreCase);
                 SizeFilter(job, a, b);
                 StateLoad stLoad;
                 HashSet<string> askSet;
@@ -1761,6 +1771,7 @@ namespace SyncPilot
             an.All = fresh.All;
             an.Actions = fresh.Actions;
             an.ScanErrors = fresh.ScanErrors;
+            an.LongPaths = fresh.LongPaths;
             an.FilesA = fresh.FilesA; an.FilesB = fresh.FilesB;
             an.BytesA = fresh.BytesA; an.BytesB = fresh.BytesB;
             an.StateLost = fresh.StateLost;
@@ -1812,6 +1823,13 @@ namespace SyncPilot
             log.Line("Modus: " + job.ModeText + (job.IncludeSubdirs ? "" : ", ohne Unterordner") +
                      (job.UseRecycleBin ? ", Löschen in den Papierkorb" : ", endgültig löschen"));
             foreach (string e in an.ScanErrors) log.Line("Warnung: " + e);
+            if (an.LongPaths.Count > 0)
+            {
+                log.Line("Hinweis: " + an.LongPaths.Count + (an.LongPaths.Count == 1 ? " Eintrag hat" : " Einträge haben") +
+                         " einen Pfad mit 260 oder mehr Zeichen. Sync Pilot gleicht sie ab; Explorer und viele andere Programme können sie aber oft nicht öffnen, und in den Papierkorb lassen sie sich nicht verschieben.");
+                foreach (string rel in an.LongPaths.Take(20)) log.Line("Hinweis: langer Pfad: " + rel);
+                if (an.LongPaths.Count > 20) log.Line("Hinweis: … und " + (an.LongPaths.Count - 20) + " weitere");
+            }
             if (an.StateNote != null) log.Line("Hinweis: " + an.StateNote + (an.StateLost ? " Nur auf einer Seite vorhandene Einträge werden nicht kopiert, sondern als Frage gezeigt." : ""));
         }
 
