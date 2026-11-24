@@ -240,8 +240,12 @@ namespace SyncPilot
                 try { at = File.GetAttributes(lp); }
                 catch (FileNotFoundException) { return; }      // Rest gibt es noch nicht (wird neu angelegt)
                 catch (DirectoryNotFoundException) { return; }
-                // zu langer Pfad (über 260 Zeichen): Der eigentliche Zugriff scheitert genauso und wird je Datei gemeldet
-                catch (PathTooLongException) { return; }
+                // Pfad nicht prüfbar (z. B. zu lang): nie ungeprüft weiterarbeiten, sondern diesen Zugriff abbrechen
+                // (betrifft nur diese Datei bzw. diesen Unterordner, wird je Eintrag gemeldet)
+                catch (PathTooLongException)
+                {
+                    throw new SyncException("Pfad nicht prüfbar (zu lang), Zugriff mit Administratorrechten abgelehnt: " + p);
+                }
                 if ((at & FileAttributes.ReparsePoint) != 0 && Reparse.IsLink(lp))
                     throw new SyncException("Verknüpfung im Sync-Ordner abgelehnt (könnte Zugriffe mit Administratorrechten umleiten): " + p);
             }
@@ -427,20 +431,35 @@ namespace SyncPilot
             else File.Move(from, to);
         }
 
-        bool IsNetwork(string path)
+        /// <summary>
+        /// Netzwerkpfad? null = unklar (Abfrage gescheitert, Typ Unknown oder NoRootDirectory, Gerätepfad).
+        /// Abweichung von „Netzwerkpfade fail-closed“: Hier entscheidet die Antwort nur zwischen Papierkorb und
+        /// endgültigem Löschen. „Im Zweifel Netzwerk“ hieße „im Zweifel endgültig löschen“; deshalb wird bei unklarem
+        /// Typ gar nicht gelöscht (siehe How).
+        /// </summary>
+        static bool? IsNetwork(string path)
         {
             try
             {
-                if (path.StartsWith("\\\\")) return true;
-                string r = Path.GetPathRoot(path);
-                return !string.IsNullOrEmpty(r) && new DriveInfo(r).DriveType == DriveType.Network;
+                string p = LongPath.Show(path);              // \\?\UNC\… → \\…, \\?\X:\… → X:\…
+                if (p.StartsWith(@"\\?\") || p.StartsWith(@"\\.\")) return null;
+                if (p.StartsWith(@"\\")) return true;
+                string r = Path.GetPathRoot(p);
+                if (string.IsNullOrEmpty(r)) return null;
+                DriveType t = new DriveInfo(r).DriveType;
+                if (t == DriveType.Network) return true;
+                if (t == DriveType.Unknown || t == DriveType.NoRootDirectory) return null;
+                return false;
             }
-            catch { return false; }
+            catch { return null; }
         }
 
         string How(bool recycleWanted, string p, out bool recycle)
         {
-            recycle = recycleWanted && !IsNetwork(p);
+            bool? net = recycleWanted ? IsNetwork(p) : false;
+            if (net == null)
+                throw new IOException("Nicht gelöscht: Der Laufwerkstyp lässt sich nicht feststellen, der Papierkorb ist deshalb nicht sicher.");
+            recycle = recycleWanted && net == false;
             return recycle ? "in den Papierkorb" : recycleWanted ? "endgültig, Netzlaufwerk ohne Papierkorb" : "endgültig";
         }
 

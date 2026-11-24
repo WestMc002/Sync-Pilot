@@ -108,7 +108,8 @@ namespace SyncPilot
                                                  : "Die Firewall-Freigabe gilt für einen anderen Programmordner";
             if (protocol != TcpProtocol)
                 return protocol == 256 ? "!Die Firewall-Freigabe gilt für alle Protokolle – bitte neu anlegen" : "Die Firewall-Freigabe gilt nicht für TCP";
-            if (ports != port.ToString()) return ports == "*" ? "!Die Firewall-Freigabe gilt für alle Ports – bitte neu anlegen" : "Die Firewall-Freigabe gilt für einen anderen Port";
+            string portProblem = PortProblem(ports, port);
+            if (portProblem != null) return portProblem;
             if ((profiles & ProfilePublic) != 0) return "!Die Firewall-Freigabe gilt auch in öffentlichen Netzen – bitte neu anlegen";
             if (!Internet)
             {
@@ -120,6 +121,39 @@ namespace SyncPilot
             // (VPN, Hyper-V, nicht erkanntes Netz) setzt „Öffentlich“ mit. Nur warnen, wenn kein Netz privat bzw. Domäne ist.
             if ((current & (ProfilePrivate | ProfileDomain)) == 0)
                 return "Das Netzwerk ist in Windows als „Öffentlich“ eingestuft – bitte auf „Privat“ umstellen";
+            return null;
+        }
+
+        /// <summary>
+        /// Lokale Ports einer Regel: genau der eigene Port = in Ordnung. Portlisten, Bereiche („1000-2000“) und
+        /// Schlüsselwörter, die den eigenen Port und noch mehr freigeben, gelten als zu weit („!“); enthält die Regel den
+        /// eigenen Port gar nicht, ist sie für einen anderen Port.
+        /// </summary>
+        static string PortProblem(string ports, int port)
+        {
+            string own = port.ToString();
+            string all = (ports ?? "").Trim();
+            if (all == own) return null;
+            if (all == "*") return "!Die Firewall-Freigabe gilt für alle Ports – bitte neu anlegen";
+            bool covers = false, other = false;
+            foreach (string raw in all.Split(','))
+            {
+                string e = raw.Trim();
+                if (e.Length == 0) continue;
+                int a, b, dash = e.IndexOf('-');
+                if (dash > 0 && int.TryParse(e.Substring(0, dash).Trim(), out a) && int.TryParse(e.Substring(dash + 1).Trim(), out b))
+                {
+                    if (a <= port && port <= b) covers = true;
+                    if (a != port || b != port) other = true;
+                }
+                else if (int.TryParse(e, out a))
+                {
+                    if (a == port) covers = true; else other = true;
+                }
+                else other = true; // Schlüsselwörter (z. B. RPC) oder Unlesbares
+            }
+            if (!covers) return "Die Firewall-Freigabe gilt für einen anderen Port";
+            if (other) return "!Die Firewall-Freigabe gilt auch für weitere Ports – bitte neu anlegen";
             return null;
         }
 

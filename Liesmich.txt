@@ -432,7 +432,9 @@ Sicherheitsnetz
     oder eine Seite ist leer) fragt das Programm nach; geplante Läufe brechen ab.
   - Was auf einer Seite nicht lesbar oder versteckt ist, gilt nie als gelöscht.
   - Auf Netzlaufwerken gibt es keinen Papierkorb; dort wird endgültig gelöscht
-    (steht im Protokoll).
+    (steht im Protokoll). Lässt sich nicht feststellen, ob ein Laufwerk lokal
+    oder ein Netzlaufwerk ist, löscht Sync Pilot dort nichts, sondern meldet
+    einen Fehler – lieber nichts löschen als versehentlich endgültig.
   - Pfade mit 260 oder mehr Zeichen gleicht Sync Pilot ab (lokal und auf
     Freigaben). Die Analyse zeigt dazu den Hinweis "lange Pfade" (Klick zeigt
     die Liste), das Protokoll ebenso: Der Explorer und viele andere Programme

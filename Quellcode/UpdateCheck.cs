@@ -1227,8 +1227,26 @@ namespace SyncPilot
             {
                 string text = ReadResult(LogFor(attemptId), true);
                 if (text != null) return text;
-                string work = WorkFor(attemptId);
-                if (IsProtectedWork(work)) return ReadResult(Path.Combine(work, "Update.log"), false);
+                // Mit Administratorrechten: Update-<Versuch>.log im geschützten Arbeitsordner. Eine Wiederherstellung nutzt
+                // den Arbeitsordner eines früheren Versuchs weiter, deshalb alle geprüften Arbeitsordner dieses Ziels
+                // durchsuchen (zuerst den des Versuchs selbst); nur genau diese Datei, keine .teil-Datei, keine Update.log.
+                string name = "Update-" + attemptId + ".log";
+                List<string> dirs = new List<string>();
+                dirs.Add(WorkFor(attemptId));
+                try
+                {
+                    string root = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+                    foreach (DirectoryInfo d in new DirectoryInfo(root).GetDirectories("SyncPilot-Update-" + TargetId + "-*"))
+                        if ((d.Attributes & FileAttributes.ReparsePoint) == 0 && !string.Equals(d.FullName, dirs[0], StringComparison.OrdinalIgnoreCase)) dirs.Add(d.FullName);
+                }
+                catch { }
+                foreach (string work in dirs)
+                {
+                    string file = Path.Combine(work, name);
+                    if (!File.Exists(file) || !IsProtectedWork(work)) continue;
+                    try { if ((File.GetAttributes(file) & FileAttributes.ReparsePoint) != 0) continue; } catch { continue; }
+                    return ReadResult(file, false);
+                }
                 return null;
             }
             string shared = ReadResult(LogFile, true);
@@ -1309,6 +1327,14 @@ function New-WorkFolder {
   $o = (Get-Acl -LiteralPath $Work).GetOwner([System.Security.Principal.SecurityIdentifier])
   if (-not ($o -eq $admins -or $o -eq $system)) { throw 'Der Arbeitsordner fuer das Update ist nicht geschuetzt.' }
 }
+# Ergebnis im geschuetzten Arbeitsordner je Versuch veroeffentlichen: erst vollstaendig als .teil schreiben, dann in
+# einem Schritt umbenennen. Der Neustarthelfer und Sync Pilot lesen nur Update-<Versuch>.log (keine .teil-Datei).
+function Publish-Result([string]$text) {
+  $f = Join-Path $Work ('Update-' + $AttemptId + '.log')
+  $t = $f + '.teil'
+  $text | Out-File -LiteralPath $t -Encoding utf8 -ErrorAction Stop
+  Move-Item -LiteralPath $t -Destination $f -Force -ErrorAction Stop
+}
 $code = $null
 try {
   # hoechstens 256 KB lesen; waehrend des Lesens darf niemand schreiben (FileShare.Read)
@@ -1330,7 +1356,7 @@ try {
   $msg = 'FEHLER Update-Skript nicht geladen, nichts veraendert: ' + $_.Exception.Message
   if ($Elevated) {
     # Ergebnis nur in den eigenen, geschuetzten Arbeitsordner; den Neustart macht der nicht erhoehte Helfer
-    try { New-WorkFolder; $msg | Out-File -LiteralPath (Join-Path $Work 'Update.log') -Encoding utf8 } catch {}
+    try { New-WorkFolder; Publish-Result $msg } catch {}
   } else {
     try { $msg | Out-File -LiteralPath $Log -Encoding utf8 } catch {}
     $deadline = (Get-Date).AddSeconds(60)
@@ -1685,7 +1711,7 @@ try {
 }
 if ($Elevated) {
   # Ergebnis nur in den eigenen, geschuetzten Arbeitsordner schreiben; Neustart macht der nicht erhoehte Prozess
-  if ($workReady) { try { $result | Out-File -LiteralPath (Join-Path $Work 'Update.log') -Encoding utf8 } catch {} }
+  if ($workReady) { try { Publish-Result $result } catch {} }
 } else {
   try { $result | Out-File -LiteralPath $Log -Encoding utf8 } catch { $noRestart = $true }
   if (-not $noRestart) { Remove-Item -LiteralPath $Work -Recurse -Force -ErrorAction SilentlyContinue }
@@ -1721,6 +1747,14 @@ function Start-Program([bool]$tray) {
   if ($tray) { $a += '/tray' }
   Start-Process -FilePath $Exe -ArgumentList $a
 }
+# Ergebnis im geschuetzten Arbeitsordner je Versuch veroeffentlichen: erst vollstaendig als .teil schreiben, dann in
+# einem Schritt umbenennen. Der Neustarthelfer und Sync Pilot lesen nur Update-<Versuch>.log (keine .teil-Datei).
+function Publish-Result([string]$text) {
+  $f = Join-Path $Work ('Update-' + $AttemptId + '.log')
+  $t = $f + '.teil'
+  $text | Out-File -LiteralPath $t -Encoding utf8 -ErrorAction Stop
+  Move-Item -LiteralPath $t -Destination $f -Force -ErrorAction Stop
+}
 $code = $null
 try {
   # hoechstens 256 KB lesen; waehrend des Lesens darf niemand schreiben (FileShare.Read)
@@ -1738,7 +1772,7 @@ try {
   if ($h -cne $ScriptHash) { throw 'Das Reparatur-Skript wurde veraendert.' }
   $code = (New-Object System.Text.UTF8Encoding($false, $true)).GetString($b)
 } catch {
-  # nichts veraendert. Erhoeht: ohne Update.log beenden (Neustarthelfer: Ergebnis unbekannt, kein Neustart).
+  # nichts veraendert. Erhoeht: ohne Ergebnisdatei beenden (Neustarthelfer: Ergebnis unbekannt, kein Neustart).
   # Ohne Adminrechte: FEHLER ins Protokoll und die bisherige Version wieder starten.
   if (-not $Elevated) {
     $msg = 'FEHLER Reparatur-Skript nicht geladen, nichts veraendert: ' + $_.Exception.Message
@@ -1942,10 +1976,10 @@ try {
 }
 if ($haveLock) { try { $lock.ReleaseMutex() } catch {} }
 if ($Elevated) {
-  # Ergebnis nur in einen gepruefen Arbeitsordner; sonst ohne Update.log beenden (Neustarthelfer: Ergebnis unbekannt,
+  # Ergebnis nur in einen gepruefen Arbeitsordner; sonst ohne Ergebnisdatei beenden (Neustarthelfer: Ergebnis unbekannt,
   # kein Neustart)
   if (-not $workTrusted) { if ($haveLock) { try { $lock.ReleaseMutex() } catch {} }; exit 1 }
-  try { $result | Out-File -LiteralPath (Join-Path $Work 'Update.log') -Encoding utf8 } catch {}
+  try { Publish-Result $result } catch {}
 } else {
   try { $result | Out-File -LiteralPath $Log -Encoding utf8 } catch { $noRestart = $true }
   if ($result.StartsWith('ZURUECK')) { Remove-Item -LiteralPath $Work -Recurse -Force -ErrorAction SilentlyContinue }
@@ -1966,23 +2000,28 @@ function Test-OldInstance {
 }
 # Neustart mit --nach-update und Versuchskennung. Nach einer Wiederherstellung ($LegacyFallback) kann die EXE aelter
 # als 1.99 sein und kennt keine Kennung: Dann nur --nach-update; ohne Adminrechte wird das Ergebnis erst unmittelbar vor
-# dem Start in die gemeinsame Datei kopiert, die aeltere Fassungen lesen ($SharedLog). Mit Adminrechten lesen auch
-# aeltere Fassungen das Ergebnis aus dem geschuetzten Arbeitsordner.
+# dem Start in die gemeinsame Datei kopiert, die aeltere Fassungen lesen ($SharedLog). Mit Adminrechten lesen aeltere
+# Fassungen Update.log im geschuetzten Arbeitsordner: Das Ergebnis wird erst unmittelbar vor dem Start dorthin kopiert.
 function Start-Program([bool]$tray) {
   $a = @('--nach-update')
   $modern = $true
   if ($LegacyFallback) { try { $modern = ([Version][System.Diagnostics.FileVersionInfo]::GetVersionInfo($Exe).FileVersion) -ge [Version]'1.99' } catch { $modern = $false } }
   if ($modern -and $AttemptId) { $a += $AttemptId }
   elseif ($UserFiles -and $SharedLog -and (Test-Path -LiteralPath $Log)) { try { Copy-Item -LiteralPath $Log -Destination $SharedLog -Force } catch {} }
+  elseif (-not $UserFiles -and (Test-Path -LiteralPath $workLog)) { try { Copy-Item -LiteralPath $workLog -Destination (Join-Path $Work 'Update.log') -Force } catch {} }
   if ($tray) { $a += '/tray' }
   Start-Process -FilePath $Exe -ArgumentList $a
 }
 # Ergebnis festhalten: ohne Adminrechte in der Datei je Versuch im Temp-Ordner; mit Adminrechten ($UserFiles = $false)
-# nichts im Temp-Ordner des Benutzers schreiben, sondern nur im geschuetzten Arbeitsordner
-$workLog = Join-Path $Work 'Update.log'
+# nichts im Temp-Ordner des Benutzers schreiben, sondern nur im geschuetzten Arbeitsordner. Gelesen wird nur die
+# Ergebnisdatei genau dieses Versuchs (eine Reparatur nutzt den Arbeitsordner eines frueheren Versuchs weiter).
+$workLog = Join-Path $Work ('Update-' + $AttemptId + '.log')
 function Write-Result([string]$text) {
   if ($UserFiles) { $text | Out-File -LiteralPath $Log -Encoding utf8 -ErrorAction Stop }
-  elseif (Test-Path -LiteralPath $Work) { $text | Out-File -LiteralPath $workLog -Encoding utf8 -ErrorAction Stop }
+  elseif (Test-Path -LiteralPath $Work) {
+    $text | Out-File -LiteralPath ($workLog + '.teil') -Encoding utf8 -ErrorAction Stop
+    Move-Item -LiteralPath ($workLog + '.teil') -Destination $workLog -Force -ErrorAction Stop
+  }
 }
 $ErrorActionPreference = 'SilentlyContinue'
 $ProgressPreference = 'SilentlyContinue'
@@ -2018,11 +2057,26 @@ if ($Installer -le 0) { exit }
 $hInst = [IntPtr]::Zero
 $waitNote = $null
 try {
-  $sig = '[DllImport(""kernel32.dll"", SetLastError = true)] public static extern IntPtr OpenProcess(int access, bool inherit, int pid); [DllImport(""kernel32.dll"", SetLastError = true)] public static extern uint WaitForSingleObject(IntPtr handle, int ms); [DllImport(""kernel32.dll"")] public static extern bool CloseHandle(IntPtr handle);'
+  $sig = '[DllImport(""kernel32.dll"", SetLastError = true)] public static extern IntPtr OpenProcess(int access, bool inherit, int pid); [DllImport(""kernel32.dll"", SetLastError = true)] public static extern uint WaitForSingleObject(IntPtr handle, int ms); [DllImport(""kernel32.dll"")] public static extern bool CloseHandle(IntPtr handle); [DllImport(""kernel32.dll"", SetLastError = true)] public static extern bool GetProcessTimes(IntPtr handle, out long creation, out long exit, out long kernel, out long user);'
   $k32 = Add-Type -MemberDefinition $sig -Name 'Warten' -Namespace 'SyncPilotNeustart' -PassThru
   $hInst = $k32::OpenProcess(0x00101000, $false, $Installer)
   if ($hInst -eq [IntPtr]::Zero) { $waitNote = 'Kein Zugriff auf das Update (Windows-Fehler ' + [System.Runtime.InteropServices.Marshal]::GetLastWin32Error() + '), Rueckfall auf die Prozess-ID.' }
 } catch { $waitNote = 'Warten ueber Handle nicht moeglich, Rueckfall auf die Prozess-ID: ' + $_.Exception.Message }
+# Startzeit (FILETIME) ueber den vorhandenen Handle oder OpenProcess mit QUERY_LIMITED_INFORMATION; 0 = unbekannt
+function Get-StartTicks([IntPtr]$h, [int]$id) {
+  $own = $false
+  try {
+    if ($h -eq [IntPtr]::Zero) { $h = $k32::OpenProcess(0x1000, $false, $id); $own = $true }
+    if ($h -eq [IntPtr]::Zero) { return [long]0 }
+    [long]$c = 0; [long]$e = 0; [long]$kt = 0; [long]$u = 0
+    if ($k32::GetProcessTimes($h, [ref]$c, [ref]$e, [ref]$kt, [ref]$u)) { return $c }
+    return [long]0
+  } catch { return [long]0 }
+  finally { if ($own -and $h -ne [IntPtr]::Zero) { try { [void]$k32::CloseHandle($h) } catch {} } }
+}
+# direkt nach dem Oeffnen merken: im Rueckfall auf die Prozess-ID gilt ein Prozess mit anderer Startzeit nicht als
+# das Update (wiederverwendete Prozess-ID)
+$InstallerStart = Get-StartTicks $hInst $Installer
 # Empfang bestaetigen: erst danach gibt Sync Pilot das Skript frei
 if ($Pipe) {
   try { [Console]::Out.WriteLine('empfangen ' + $Installer); [Console]::Out.Flush() } catch { exit }
@@ -2040,7 +2094,12 @@ function Test-Installer {
     try { [void]$k32::CloseHandle($hInst) } catch {}
     $script:hInst = [IntPtr]::Zero
   }
-  return [bool](Get-Process -Id $Installer -ErrorAction SilentlyContinue)
+  if (-not (Get-Process -Id $Installer -ErrorAction SilentlyContinue)) { return $false }
+  if ($InstallerStart -ne 0) {
+    $t = Get-StartTicks ([IntPtr]::Zero) $Installer
+    if ($t -ne 0 -and $t -ne $InstallerStart) { return $false }
+  }
+  return $true
 }
 # Neustart erst nach bestaetigtem Ende des Skripts. Sync Pilot: 45 statt 15 Minuten, weil das Update bis zu
 # 30 Minuten auf laufende Abgleiche nach Zeitplan wartet. Bei Fristablauf Fehler melden und nicht starten.
