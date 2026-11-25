@@ -556,7 +556,6 @@ namespace SyncPilot
             Var(vars, "TargetId", TargetId);
             Var(vars, "TempRoot", Folder);
             Var(vars, "Log", logFile);
-            Var(vars, "SharedLog", "");
             vars.Append("$LegacyFallback = $false\n");
             Var(vars, "AttemptId", attemptId);
             Var(vars, "ReleaseId", attemptId);
@@ -638,8 +637,7 @@ namespace SyncPilot
             until = DateTime.UtcNow.AddSeconds(30);
             while (true)
             {
-                string ack = null;
-                try { if (File.Exists(ackFile)) ack = File.ReadAllText(ackFile).Trim(); } catch { }
+                string ack = ReadSmall(ackFile);
                 if (ack == id.ToString(System.Globalization.CultureInfo.InvariantCulture)) break;
                 bool exited = true;
                 try { exited = helper.HasExited; } catch { }
@@ -710,6 +708,26 @@ namespace SyncPilot
             }
         }
 
+        /// <summary>
+        /// Steuerdatei aus dem Temp-Ordner einmal öffnen und aus demselben Stream höchstens 257 Bytes lesen;
+        /// mehr als 256 Bytes oder nicht lesbar = ungültig (null). Nicht erst die Größe prüfen und erneut öffnen.
+        /// </summary>
+        static string ReadSmall(string file)
+        {
+            try
+            {
+                using (FileStream fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read))
+                {
+                    byte[] buf = new byte[257];
+                    int n = 0, k;
+                    while (n < 257 && (k = fs.Read(buf, n, 257 - n)) > 0) n += k;
+                    if (n > 256) return null;
+                    return Encoding.ASCII.GetString(buf, 0, n).Trim();
+                }
+            }
+            catch { return null; }
+        }
+
         static bool WriteStartFile(string file, string text)
         {
             try
@@ -744,7 +762,6 @@ namespace SyncPilot
             Var(r, "StartFile", startFile);
             Var(r, "ReadyFile", readyFile);
             Var(r, "AckFile", ackFile);
-            Var(r, "SharedLog", !pipe && string.IsNullOrEmpty(attempt) ? LogFile : "");
             r.Append("$UserFiles = $").Append(pipe ? "false" : "true").Append("\n");
             r.Append("$Pipe = $").Append(pipe ? "true" : "false").Append("\n");
             r.Append("$Tray = $").Append(tray ? "true" : "false").Append("\n");
@@ -1041,6 +1058,17 @@ namespace SyncPilot
             string dir = PendingRestore();
             if (dir == null) return false;
             ErrorLog("Nicht abgeschlossenes Update gefunden: " + dir);
+            // Altformat ohne Prüfsummen (Journal von 1.98) in einem geschützten Arbeitsordner: Die Wiederherstellung liefe
+            // mit Administratorrechten und verlangt dort für jede Sicherung eine Prüfsumme. Nicht zurücksetzen, sondern
+            // auf die Neuinstallation aus dem signierten Paket hinweisen (Globale Richtlinien › Integritätsnachweis).
+            if (NeedsReinstall(dir))
+            {
+                ErrorLog("Wiederherstellung mit Administratorrechten nicht möglich: Das Journal hat das alte Format ohne Prüfsummen. Bitte neu installieren.");
+                if (MessageBox.Show(owner,
+                    PendingText + "\n\nDie vorherige Version lässt sich nicht sicher automatisch wiederherstellen. Bitte Sync Pilot neu aus dem signierten Paket von der Download-Seite installieren. Einstellungen und Aufgaben bleiben erhalten.\n\nDownload-Seite jetzt öffnen?",
+                    "Update", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes) Ui.Open(ReleasesPage);
+                return false;
+            }
             if (MessageBox.Show(owner,
                 PendingText + "\n\nSync Pilot stellt jetzt die vorherige Version wieder her und startet danach neu.\n\nJetzt wiederherstellen?",
                 "Update", MessageBoxButtons.YesNo, MessageBoxIcon.Information) != DialogResult.Yes) return false;
@@ -1051,6 +1079,24 @@ namespace SyncPilot
                 MessageBox.Show(owner, ex.Message, "Update", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Geschützter Arbeitsordner (Wiederherstellung mit Administratorrechten) mit einem Journal im alten Format von
+        /// 1.98: Merker nur mit dem Alt-Ordner und ohne „Bereit“, Sicherungen ohne Prüfsumme.
+        /// </summary>
+        static bool NeedsReinstall(string dir)
+        {
+            try
+            {
+                string data = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+                if (!string.Equals(Path.GetDirectoryName(dir), data, StringComparison.OrdinalIgnoreCase)) return false;
+                if (ReadMarker(dir) != MarkerKind.Legacy) return false;
+                string journal = Path.Combine(dir, "Wiederherstellung.txt");
+                if (!File.Exists(journal) || new FileInfo(journal).Length > 64 * 1024) return false;
+                return Array.IndexOf(File.ReadAllLines(journal, Encoding.UTF8), "Bereit") < 0;
+            }
+            catch { return false; }
         }
 
         static void Repair(string dir, bool tray)
@@ -1075,7 +1121,7 @@ namespace SyncPilot
             StringBuilder vars = new StringBuilder();
             vars.Append("$ProcessId = ").Append(pid).Append("\n");
             // Die wiederhergestellte EXE kann älter als 1.99 sein: Start-Program prüft ihre Version. Ab 1.99 mit Kennung
-            // und eigener Ergebnisdatei, sonst ohne Kennung (ohne Adminrechte mit Kopie in die gemeinsame Update.log)
+            // und eigener Ergebnisdatei, sonst ohne Kennung; das Ergebnis zeigt dann der Neustart selbst an
             Var(vars, "AttemptId", attemptId);
             vars.Append("$LegacyFallback = $true\n");
             Var(vars, "ReleaseId", attemptId);
@@ -1088,7 +1134,6 @@ namespace SyncPilot
             Var(vars, "LockName", LockName);
             Var(vars, "TargetId", TargetId);
             Var(vars, "Log", LogFor(attemptId));
-            Var(vars, "SharedLog", LogFile);
             vars.Append("$Elevated = $").Append(elevated ? "true" : "false").Append("\n");
             vars.Append("$Tray = $").Append(tray ? "true" : "false").Append("\n");
             // Reparatur-Skript als Datei im Temp-Ordner, auf der Befehlszeile nur Lader, Werte und SHA-256 (wie beim
@@ -1293,17 +1338,59 @@ function Test-OldInstance {
   if ($ProcessStart -gt 0) { try { return ($p.StartTime.ToUniversalTime().Ticks -eq $ProcessStart) } catch { return $true } }
   return $true
 }
+# Steuerdatei aus dem Temp-Ordner (Startdatei, Bestaetigung, Freigabe): einmal oeffnen und aus demselben Stream
+# hoechstens 257 Bytes lesen; mehr als 256 Bytes oder nicht lesbar = ungueltig ($null)
+function Read-Small([string]$p) {
+  try {
+    $fs = [System.IO.File]::Open($p, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+    try {
+      $b = New-Object byte[] 257
+      $n = 0
+      while ($n -lt 257) { $k = $fs.Read($b, $n, 257 - $n); if ($k -le 0) { break }; $n += $k }
+    } finally { $fs.Dispose() }
+    if ($n -gt 256) { return $null }
+    return [System.Text.Encoding]::ASCII.GetString($b, 0, $n).Trim()
+  } catch { return $null }
+}
+# Ergebnisdatei hoechstens 16 KB ueber einen Zugriff lesen; groesser oder nicht lesbar = $null
+function Read-Result([string]$p) {
+  try {
+    $fs = [System.IO.File]::Open($p, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+    try {
+      $b = New-Object byte[] 16385
+      $n = 0
+      while ($n -lt 16385) { $k = $fs.Read($b, $n, 16385 - $n); if ($k -le 0) { break }; $n += $k }
+    } finally { $fs.Dispose() }
+    if ($n -gt 16384) { return $null }
+    return (New-Object System.Text.UTF8Encoding($false)).GetString($b, 0, $n).TrimStart([char]0xFEFF).Trim()
+  } catch { return $null }
+}
+# Ergebnis dieses Versuchs selbst anzeigen (fuer wiederhergestellte Fassungen ohne Versuchskennung, vor 1.99), ohne
+# die gemeinsame Update.log anzufassen: parallele Versuche verschiedener Installationen ueberschreiben sich so nicht
+function Show-Result([string]$file) {
+  $text = Read-Result $file
+  if (-not $text) { $text = 'OFFEN Ergebnis des Updates unbekannt.' }
+  $icon = 'Warning'
+  if ($text -match '^(OK|ZURUECK) ') { $icon = 'Information' }
+  $text = $text -replace '^(OK|FEHLER|ZURUECK|OFFEN) ', ''
+  try {
+    Add-Type -AssemblyName System.Windows.Forms
+    [void][System.Windows.Forms.MessageBox]::Show($text, 'Sync Pilot', 'OK', $icon)
+  } catch {}
+}
 # Neustart mit --nach-update und Versuchskennung. Nach einer Wiederherstellung ($LegacyFallback) kann die EXE aelter
-# als 1.99 sein und kennt keine Kennung: Dann nur --nach-update, und das Ergebnis wird erst unmittelbar vor dem Start
-# in die gemeinsame Datei kopiert, die aeltere Fassungen lesen ($SharedLog).
+# als 1.99 sein und kennt keine Kennung: Dann ohne --nach-update starten und das Ergebnis dieses Versuchs hier anzeigen.
 function Start-Program([bool]$tray) {
-  $a = @('--nach-update')
   $modern = $true
   if ($LegacyFallback) { try { $modern = ([Version][System.Diagnostics.FileVersionInfo]::GetVersionInfo($Exe).FileVersion) -ge [Version]'1.99' } catch { $modern = $false } }
-  if ($modern -and $AttemptId) { $a += $AttemptId }
-  elseif ($SharedLog -and (Test-Path -LiteralPath $Log)) { try { Copy-Item -LiteralPath $Log -Destination $SharedLog -Force } catch {} }
-  if ($tray) { $a += '/tray' }
-  Start-Process -FilePath $Exe -ArgumentList $a
+  if ($modern -and $AttemptId) {
+    $a = @('--nach-update', $AttemptId)
+    if ($tray) { $a += '/tray' }
+    Start-Process -FilePath $Exe -ArgumentList $a
+    return
+  }
+  if ($tray) { Start-Process -FilePath $Exe -ArgumentList @('/tray') } else { Start-Process -FilePath $Exe }
+  Show-Result $Log
 }
 $ErrorActionPreference = 'Stop'
 # geschuetzten Arbeitsordner anlegen: Besitzer Administratoren, schreiben nur SYSTEM und Administratoren, lesen angemeldete Benutzer
@@ -1413,6 +1500,17 @@ function Copy-Limited([string]$src, [string]$dst, [long]$max) {
 # ZIP hoechstens so gross wie heruntergeladen und nie ueber 64 MB
 $zipMax = [Math]::Min([long]$ZipSize, [long]67108864)
 $target = Split-Path $Exe -Parent
+# Lebenszeichen im geschuetzten Arbeitsordner (Schreibrecht nur Administratoren und SYSTEM): alle 5 Sekunden neu
+# geschrieben, unabhaengig davon, was das Skript gerade tut (Timer im Hintergrund). Ein frisches Lebenszeichen kann nur
+# von diesem erhoehten Skript stammen; der Neustarthelfer wartet daran, wenn er den Prozess nicht oeffnen darf (UAC mit
+# einem anderen Administratorkonto) und die Prozess-ID allein nichts beweist. Fehlschlag ist unkritisch.
+function Start-Pulse {
+  try {
+    $src = 'using System; using System.IO; using System.Threading; public static class SyncPilotPuls { static Timer t; public static void Start(string f) { t = new Timer(delegate(object o) { try { File.WriteAllText(f, DateTime.UtcNow.ToString(""o"")); } catch { } }, null, 0, 5000); } }'
+    Add-Type -TypeDefinition $src -ErrorAction Stop
+    [SyncPilotPuls]::Start((Join-Path $Work ('Lebenszeichen-' + $AttemptId)))
+  } catch {}
+}
 $workReady = -not $Elevated
 $result = $null
 $lock = $null
@@ -1435,21 +1533,13 @@ try {
     Start-Sleep -Milliseconds 250
   }
   Start-Sleep -Milliseconds 500
-  # auch andere Sync-Pilot-Prozesse mit derselben EXE abwarten (z. B. ein Abgleich nach Zeitplan, hoechstens 30 Minuten)
-  $until = (Get-Date).AddMinutes(30)
-  while ($true) {
-    $running = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { try { $_.Path -eq $Exe } catch { $false } })
-    if ($running.Count -eq 0) { break }
-    if ((Get-Date) -gt $until) { throw 'Ein anderer Sync-Pilot-Prozess wurde nach 30 Minuten nicht beendet.' }
-    Start-Sleep -Seconds 2
-  }
   # erhoeht: nur mit ausdruecklicher Freigabe fuer genau diesen Versuch. Sync Pilot erteilt sie erst, wenn der
   # Neustarthelfer bereit ist und die Startbestaetigung geschrieben wurde; ohne Freigabe nichts veraendern.
   # Sync Pilot selbst mit Administratorrechten ($ParentAdmin): Das Programm hat das Skript direkt gestartet und haelt
   # den Neustarthelfer ueber eine Pipe; ohne dessen Empfangsbestaetigung beendet es das Skript, bevor es etwas aendert.
   if ($Elevated -and -not ($ParentAdmin -and -not $ReleaseFile)) {
     $released = $false
-    try { if ((Get-Item -LiteralPath $ReleaseFile).Length -le 256) { $released = ([System.IO.File]::ReadAllText($ReleaseFile).Trim() -ceq $ReleaseId) } } catch {}
+    $released = ((Read-Small $ReleaseFile) -ceq $ReleaseId)
     if (-not $released) { throw 'Das Update wurde nicht freigegeben.' }
   }
   if ($Elevated) {
@@ -1485,6 +1575,8 @@ try {
     # Arbeitsordner gleich mit Rechten anlegen (New-WorkFolder steht im Lader)
     New-WorkFolder
     $workReady = $true
+    # Lebenszeichen fuer den Neustarthelfer (siehe Start-Pulse), vor dem langen Warten auf Abgleiche
+    Start-Pulse
     $zipWork = Join-Path $Work 'Update.zip'
     $manifestWork = Join-Path $Work 'Update.manifest'
     Copy-Limited $Zip $zipWork $zipMax
@@ -1492,6 +1584,14 @@ try {
   } else {
     $zipWork = $Zip
     $manifestWork = $Manifest
+  }
+  # erst jetzt (nach Freigabe und mit laufendem Lebenszeichen): auch andere Sync-Pilot-Prozesse mit derselben EXE abwarten (z. B. ein Abgleich nach Zeitplan, hoechstens 30 Minuten)
+  $until = (Get-Date).AddMinutes(30)
+  while ($true) {
+    $running = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { try { $_.Path -eq $Exe } catch { $false } })
+    if ($running.Count -eq 0) { break }
+    if ((Get-Date) -gt $until) { throw 'Ein anderer Sync-Pilot-Prozess wurde nach 30 Minuten nicht beendet.' }
+    Start-Sleep -Seconds 2
   }
   # Signatur des Manifests selbst pruefen (eigene Herausgeberpruefung, an der Kopie, die verwendet wird)
   $bytes = Read-Limited $manifestWork 8192
@@ -1735,17 +1835,59 @@ function Test-OldInstance {
   if ($ProcessStart -gt 0) { try { return ($p.StartTime.ToUniversalTime().Ticks -eq $ProcessStart) } catch { return $true } }
   return $true
 }
+# Steuerdatei aus dem Temp-Ordner (Startdatei, Bestaetigung, Freigabe): einmal oeffnen und aus demselben Stream
+# hoechstens 257 Bytes lesen; mehr als 256 Bytes oder nicht lesbar = ungueltig ($null)
+function Read-Small([string]$p) {
+  try {
+    $fs = [System.IO.File]::Open($p, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+    try {
+      $b = New-Object byte[] 257
+      $n = 0
+      while ($n -lt 257) { $k = $fs.Read($b, $n, 257 - $n); if ($k -le 0) { break }; $n += $k }
+    } finally { $fs.Dispose() }
+    if ($n -gt 256) { return $null }
+    return [System.Text.Encoding]::ASCII.GetString($b, 0, $n).Trim()
+  } catch { return $null }
+}
+# Ergebnisdatei hoechstens 16 KB ueber einen Zugriff lesen; groesser oder nicht lesbar = $null
+function Read-Result([string]$p) {
+  try {
+    $fs = [System.IO.File]::Open($p, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+    try {
+      $b = New-Object byte[] 16385
+      $n = 0
+      while ($n -lt 16385) { $k = $fs.Read($b, $n, 16385 - $n); if ($k -le 0) { break }; $n += $k }
+    } finally { $fs.Dispose() }
+    if ($n -gt 16384) { return $null }
+    return (New-Object System.Text.UTF8Encoding($false)).GetString($b, 0, $n).TrimStart([char]0xFEFF).Trim()
+  } catch { return $null }
+}
+# Ergebnis dieses Versuchs selbst anzeigen (fuer wiederhergestellte Fassungen ohne Versuchskennung, vor 1.99), ohne
+# die gemeinsame Update.log anzufassen: parallele Versuche verschiedener Installationen ueberschreiben sich so nicht
+function Show-Result([string]$file) {
+  $text = Read-Result $file
+  if (-not $text) { $text = 'OFFEN Ergebnis des Updates unbekannt.' }
+  $icon = 'Warning'
+  if ($text -match '^(OK|ZURUECK) ') { $icon = 'Information' }
+  $text = $text -replace '^(OK|FEHLER|ZURUECK|OFFEN) ', ''
+  try {
+    Add-Type -AssemblyName System.Windows.Forms
+    [void][System.Windows.Forms.MessageBox]::Show($text, 'Sync Pilot', 'OK', $icon)
+  } catch {}
+}
 # Neustart mit --nach-update und Versuchskennung. Nach einer Wiederherstellung ($LegacyFallback) kann die EXE aelter
-# als 1.99 sein und kennt keine Kennung: Dann nur --nach-update, und das Ergebnis wird erst unmittelbar vor dem Start
-# in die gemeinsame Datei kopiert, die aeltere Fassungen lesen ($SharedLog).
+# als 1.99 sein und kennt keine Kennung: Dann ohne --nach-update starten und das Ergebnis dieses Versuchs hier anzeigen.
 function Start-Program([bool]$tray) {
-  $a = @('--nach-update')
   $modern = $true
   if ($LegacyFallback) { try { $modern = ([Version][System.Diagnostics.FileVersionInfo]::GetVersionInfo($Exe).FileVersion) -ge [Version]'1.99' } catch { $modern = $false } }
-  if ($modern -and $AttemptId) { $a += $AttemptId }
-  elseif ($SharedLog -and (Test-Path -LiteralPath $Log)) { try { Copy-Item -LiteralPath $Log -Destination $SharedLog -Force } catch {} }
-  if ($tray) { $a += '/tray' }
-  Start-Process -FilePath $Exe -ArgumentList $a
+  if ($modern -and $AttemptId) {
+    $a = @('--nach-update', $AttemptId)
+    if ($tray) { $a += '/tray' }
+    Start-Process -FilePath $Exe -ArgumentList $a
+    return
+  }
+  if ($tray) { Start-Process -FilePath $Exe -ArgumentList @('/tray') } else { Start-Process -FilePath $Exe }
+  Show-Result $Log
 }
 # Ergebnis im geschuetzten Arbeitsordner je Versuch veroeffentlichen: erst vollstaendig als .teil schreiben, dann in
 # einem Schritt umbenennen. Der Neustarthelfer und Sync Pilot lesen nur Update-<Versuch>.log (keine .teil-Datei).
@@ -1792,6 +1934,17 @@ $result = $null
 $noRestart = $false
 $haveLock = $false
 $lock = $null
+# Lebenszeichen im geschuetzten Arbeitsordner (Schreibrecht nur Administratoren und SYSTEM): alle 5 Sekunden neu
+# geschrieben, unabhaengig davon, was das Skript gerade tut (Timer im Hintergrund). Ein frisches Lebenszeichen kann nur
+# von diesem erhoehten Skript stammen; der Neustarthelfer wartet daran, wenn er den Prozess nicht oeffnen darf (UAC mit
+# einem anderen Administratorkonto) und die Prozess-ID allein nichts beweist. Fehlschlag ist unkritisch.
+function Start-Pulse {
+  try {
+    $src = 'using System; using System.IO; using System.Threading; public static class SyncPilotPuls { static Timer t; public static void Start(string f) { t = new Timer(delegate(object o) { try { File.WriteAllText(f, DateTime.UtcNow.ToString(""o"")); } catch { } }, null, 0, 5000); } }'
+    Add-Type -TypeDefinition $src -ErrorAction Stop
+    [SyncPilotPuls]::Start((Join-Path $Work ('Lebenszeichen-' + $AttemptId)))
+  } catch {}
+}
 $workTrusted = $false
 $target = Split-Path $Exe -Parent
 try {
@@ -1811,7 +1964,7 @@ try {
   # den Neustarthelfer ueber eine Pipe; ohne dessen Empfangsbestaetigung beendet es das Skript, bevor es etwas aendert.
   if ($Elevated -and -not ($ParentAdmin -and -not $ReleaseFile)) {
     $released = $false
-    try { if ((Get-Item -LiteralPath $ReleaseFile).Length -le 256) { $released = ([System.IO.File]::ReadAllText($ReleaseFile).Trim() -ceq $ReleaseId) } } catch {}
+    $released = ((Read-Small $ReleaseFile) -ceq $ReleaseId)
     if (-not $released) { throw 'Die Wiederherstellung wurde nicht freigegeben.' }
   }
   # dieselbe Sperre wie das Update: nie zwei Wiederherstellungen oder Update und Wiederherstellung gleichzeitig
@@ -1888,6 +2041,7 @@ try {
   if ((Get-Item -LiteralPath $journal).Length -gt 65536) { throw 'Das Wiederherstellungsjournal ist zu gross.' }
   if (Test-Path -LiteralPath $altDir) { Assert-Protected $altDir }
   $workTrusted = $true
+  if ($Elevated) { Start-Pulse }
   $lines = [System.IO.File]::ReadAllLines($journal)
   if ($lines.Count -lt 2 -or -not ($lines[0].StartsWith('Sync Pilot ') -or $lines[0].StartsWith('Sync-Pilot-Update ')) -or -not $lines[0].EndsWith(' - Wiederherstellungsjournal')) { throw 'Das Journal ist nicht lesbar.' }
   $format155 = (-not $format2) -and ($lines -ccontains 'Bereit')
@@ -1998,24 +2152,68 @@ function Test-OldInstance {
   if ($ProcessStart -gt 0) { try { return ($p.StartTime.ToUniversalTime().Ticks -eq $ProcessStart) } catch { return $true } }
   return $true
 }
+# Steuerdatei aus dem Temp-Ordner (Startdatei, Bestaetigung, Freigabe): einmal oeffnen und aus demselben Stream
+# hoechstens 257 Bytes lesen; mehr als 256 Bytes oder nicht lesbar = ungueltig ($null)
+function Read-Small([string]$p) {
+  try {
+    $fs = [System.IO.File]::Open($p, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+    try {
+      $b = New-Object byte[] 257
+      $n = 0
+      while ($n -lt 257) { $k = $fs.Read($b, $n, 257 - $n); if ($k -le 0) { break }; $n += $k }
+    } finally { $fs.Dispose() }
+    if ($n -gt 256) { return $null }
+    return [System.Text.Encoding]::ASCII.GetString($b, 0, $n).Trim()
+  } catch { return $null }
+}
+# Ergebnisdatei hoechstens 16 KB ueber einen Zugriff lesen; groesser oder nicht lesbar = $null
+function Read-Result([string]$p) {
+  try {
+    $fs = [System.IO.File]::Open($p, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+    try {
+      $b = New-Object byte[] 16385
+      $n = 0
+      while ($n -lt 16385) { $k = $fs.Read($b, $n, 16385 - $n); if ($k -le 0) { break }; $n += $k }
+    } finally { $fs.Dispose() }
+    if ($n -gt 16384) { return $null }
+    return (New-Object System.Text.UTF8Encoding($false)).GetString($b, 0, $n).TrimStart([char]0xFEFF).Trim()
+  } catch { return $null }
+}
+# Ergebnis dieses Versuchs selbst anzeigen (fuer wiederhergestellte Fassungen ohne Versuchskennung, vor 1.99), ohne
+# die gemeinsame Update.log anzufassen: parallele Versuche verschiedener Installationen ueberschreiben sich so nicht
+function Show-Result([string]$file) {
+  $text = Read-Result $file
+  if (-not $text) { $text = 'OFFEN Ergebnis des Updates unbekannt.' }
+  $icon = 'Warning'
+  if ($text -match '^(OK|ZURUECK) ') { $icon = 'Information' }
+  $text = $text -replace '^(OK|FEHLER|ZURUECK|OFFEN) ', ''
+  try {
+    Add-Type -AssemblyName System.Windows.Forms
+    [void][System.Windows.Forms.MessageBox]::Show($text, 'Sync Pilot', 'OK', $icon)
+  } catch {}
+}
 # Neustart mit --nach-update und Versuchskennung. Nach einer Wiederherstellung ($LegacyFallback) kann die EXE aelter
-# als 1.99 sein und kennt keine Kennung: Dann nur --nach-update; ohne Adminrechte wird das Ergebnis erst unmittelbar vor
-# dem Start in die gemeinsame Datei kopiert, die aeltere Fassungen lesen ($SharedLog). Mit Adminrechten lesen aeltere
-# Fassungen Update.log im geschuetzten Arbeitsordner: Das Ergebnis wird erst unmittelbar vor dem Start dorthin kopiert.
+# als 1.99 sein und kennt keine Kennung: Dann ohne --nach-update starten und das Ergebnis dieses Versuchs hier anzeigen
+# (ohne Adminrechte aus der Datei je Versuch im Temp-Ordner, mit Adminrechten aus dem geschuetzten Arbeitsordner).
+# Eine gemeinsame Update.log wird nicht mehr beschrieben.
 function Start-Program([bool]$tray) {
-  $a = @('--nach-update')
   $modern = $true
   if ($LegacyFallback) { try { $modern = ([Version][System.Diagnostics.FileVersionInfo]::GetVersionInfo($Exe).FileVersion) -ge [Version]'1.99' } catch { $modern = $false } }
-  if ($modern -and $AttemptId) { $a += $AttemptId }
-  elseif ($UserFiles -and $SharedLog -and (Test-Path -LiteralPath $Log)) { try { Copy-Item -LiteralPath $Log -Destination $SharedLog -Force } catch {} }
-  elseif (-not $UserFiles -and (Test-Path -LiteralPath $workLog)) { try { Copy-Item -LiteralPath $workLog -Destination (Join-Path $Work 'Update.log') -Force } catch {} }
-  if ($tray) { $a += '/tray' }
-  Start-Process -FilePath $Exe -ArgumentList $a
+  if ($modern -and $AttemptId) {
+    $a = @('--nach-update', $AttemptId)
+    if ($tray) { $a += '/tray' }
+    Start-Process -FilePath $Exe -ArgumentList $a
+    return
+  }
+  if ($tray) { Start-Process -FilePath $Exe -ArgumentList @('/tray') } else { Start-Process -FilePath $Exe }
+  if ($UserFiles) { Show-Result $Log } else { Show-Result $workLog }
 }
 # Ergebnis festhalten: ohne Adminrechte in der Datei je Versuch im Temp-Ordner; mit Adminrechten ($UserFiles = $false)
 # nichts im Temp-Ordner des Benutzers schreiben, sondern nur im geschuetzten Arbeitsordner. Gelesen wird nur die
 # Ergebnisdatei genau dieses Versuchs (eine Reparatur nutzt den Arbeitsordner eines frueheren Versuchs weiter).
 $workLog = Join-Path $Work ('Update-' + $AttemptId + '.log')
+# das erhoehte Skript veroeffentlicht sein Ergebnis immer als Letztes in dieser Datei
+$resultFile = $workLog
 function Write-Result([string]$text) {
   if ($UserFiles) { $text | Out-File -LiteralPath $Log -Encoding utf8 -ErrorAction Stop }
   elseif (Test-Path -LiteralPath $Work) {
@@ -2040,7 +2238,7 @@ if ($Pipe) {
   $end = (Get-Date).AddMinutes(15)
   while ((Get-Date) -lt $end) {
     if (Test-Path -LiteralPath $StartFile) {
-      $s = [string](Get-Content -LiteralPath $StartFile -TotalCount 1)
+      $s = [string](Read-Small $StartFile)
       Remove-Item -LiteralPath $StartFile -Force
       if ($s.Trim() -match '^[0-9]{1,10}$') { $Installer = [int]$s.Trim() }
       break
@@ -2083,23 +2281,50 @@ if ($Pipe) {
 } else {
   try { [string]$Installer | Out-File -LiteralPath $AckFile -Encoding ascii } catch { exit }
 }
-# $true = laeuft noch. WAIT_OBJECT_0 (0) = beendet, WAIT_TIMEOUT (258) = laeuft; WAIT_FAILED: Fehlercode merken und
-# ab dann ueber die Prozess-ID pruefen
+# $true = laeuft noch. Liegt das Ergebnis dieses Versuchs vor, ist das Skript fertig (es schreibt es als Letztes).
+# WAIT_OBJECT_0 (0) = beendet, WAIT_TIMEOUT (258) = laeuft; WAIT_FAILED: Fehlercode merken und ab dann ueber die
+# Prozess-ID pruefen. $endConfirmed: Ende belegt (Ergebnisdatei, Handle signalisiert, kein Prozess mit der ID, andere
+# Startzeit); nur dann wird der Versuchsordner geloescht.
+$unclearEnd = $null
+$endConfirmed = $false
+# Alter des Lebenszeichens in Sekunden ($null = keins): nur eine echte Datei (keine Verknuepfung) im Arbeitsordner,
+# deren Besitzer Administratoren oder SYSTEM ist; ein normales Programm kann dort nichts anlegen
+$pulseFile = Join-Path $Work ('Lebenszeichen-' + $AttemptId)
+function Get-PulseAge {
+  try {
+    $fi = New-Object System.IO.FileInfo($pulseFile)
+    if (-not $fi.Exists -or ($fi.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) { return $null }
+    $o = $fi.GetAccessControl().GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+    if ($o -ne 'S-1-5-32-544' -and $o -ne 'S-1-5-18') { return $null }
+    return ([DateTime]::UtcNow - $fi.LastWriteTimeUtc).TotalSeconds
+  } catch { return $null }
+}
 function Test-Installer {
+  if (Test-Path -LiteralPath $resultFile) { $script:endConfirmed = $true; return $false }
   if ($hInst -ne [IntPtr]::Zero) {
     $r = $k32::WaitForSingleObject($hInst, 0)
-    if ($r -eq 0) { return $false }
+    if ($r -eq 0) { $script:endConfirmed = $true; return $false }
     if ($r -eq 258) { return $true }
     $script:waitNote = 'Warten auf das Update fehlgeschlagen (Windows-Fehler ' + [System.Runtime.InteropServices.Marshal]::GetLastWin32Error() + '), Rueckfall auf die Prozess-ID.'
     try { [void]$k32::CloseHandle($hInst) } catch {}
     $script:hInst = [IntPtr]::Zero
   }
-  if (-not (Get-Process -Id $Installer -ErrorAction SilentlyContinue)) { return $false }
+  if (-not (Get-Process -Id $Installer -ErrorAction SilentlyContinue)) { $script:endConfirmed = $true; return $false }
   if ($InstallerStart -ne 0) {
     $t = Get-StartTicks ([IntPtr]::Zero) $Installer
-    if ($t -ne 0 -and $t -ne $InstallerStart) { return $false }
+    if ($t -ne 0 -and $t -ne $InstallerStart) { $script:endConfirmed = $true; return $false }
+    return $true
   }
-  return $true
+  # Identitaet ungeklaert (kein Handle, keine Startzeit): Ein Prozess mit dieser ID beweist nichts. Dann zaehlt nur
+  # noch die Ergebnisdatei dieses Versuchs (oben) oder das Lebenszeichen des erhoehten Skripts im geschuetzten
+  # Arbeitsordner (Abweichung Sync Pilot, weil das Update bis zu 30 Minuten auf Abgleiche wartet): weiter warten,
+  # solange es hoechstens 2 Minuten alt ist. Ohne Lebenszeichen endet das Warten nach 2 Minuten, und ohne Ergebnis
+  # wird ein unklarer Zustand gemeldet (kein Neustart).
+  if (-not $waitNote) { $script:waitNote = 'Das Update liess sich nur ueber die Prozess-ID verfolgen.' }
+  $age = Get-PulseAge
+  if ($age -ne $null) { return ($age -lt 120) }
+  if ($script:unclearEnd -eq $null) { $script:unclearEnd = (Get-Date).AddMinutes(2) }
+  return ((Get-Date) -lt $script:unclearEnd)
 }
 # Neustart erst nach bestaetigtem Ende des Skripts. Sync Pilot: 45 statt 15 Minuten, weil das Update bis zu
 # 30 Minuten auf laufende Abgleiche nach Zeitplan wartet. Bei Fristablauf Fehler melden und nicht starten.
@@ -2117,21 +2342,21 @@ if (-not $finished) {
   exit
 }
 Start-Sleep -Milliseconds 300
-$text = $null
-if ((Test-Path -LiteralPath $workLog) -and (Get-Item -LiteralPath $workLog).Length -le 16384) { $text = Get-Content -LiteralPath $workLog -Raw -Encoding UTF8 }
-if ($text) { $text = $text.Trim() }
+$text = Read-Result $resultFile
 # Neustart nur bei eindeutigem Abschluss: installiert (OK), nichts veraendert bzw. vollstaendig zurueckgesetzt
 # (FEHLER) oder wiederhergestellt (ZURUECK), und ohne offenen Merker
 $clear = $text -and ($text -match '^(OK|FEHLER|ZURUECK) ') -and -not (Test-Path -LiteralPath (Join-Path $Work 'Wiederherstellung-offen'))
 if (-not $clear) {
-  if (-not $text) { $text = 'OFFEN Ergebnis des Updates unbekannt.' }
+  if (-not $text) { $text = 'OFFEN Ergebnis des Updates unbekannt.'; if ($waitNote) { $text += ' ' + $waitNote } }
   try { Write-Result ($text + ' Sync Pilot wurde nicht neu gestartet.') } catch {}
   exit
 }
 if ($UserFiles) {
   # laesst sich das Ergebnis nicht schreiben, nicht neu starten (Download-Ordner bleibt)
   try { Write-Result $text } catch { exit }
-  if ($Attempt) { Remove-Item -LiteralPath $Attempt -Recurse -Force }
+  # Versuchsordner (Eingabedateien des Updates) nur bei belegtem Ende loeschen; sonst bleibt er fuer die spaetere
+  # Bereinigung, damit ein moeglicherweise noch laufendes Update nicht gestoert wird
+  if ($Attempt -and $endConfirmed) { Remove-Item -LiteralPath $Attempt -Recurse -Force }
 }
 # alte Instanz muss beendet sein (Ladefehler kommen sehr frueh)
 $deadline = (Get-Date).AddSeconds(60)
