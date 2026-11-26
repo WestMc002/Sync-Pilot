@@ -80,6 +80,18 @@ namespace SyncPilot
 
         void Add(string line)
         {
+            // Protokollzeilen enthalten fremde Dateinamen: Zeitlimit der Muster überschritten = Zeile unverändert zeigen
+            try { AddCore(line); }
+            catch (RegexMatchTimeoutException)
+            {
+                LogEntry raw = new LogEntry();
+                raw.Raw = raw.Text = line;
+                Entries.Add(raw);
+            }
+        }
+
+        void AddCore(string line)
+        {
             if (line == null || line.Trim().Length == 0) return;
             LogEntry e = new LogEntry();
             e.Raw = line;

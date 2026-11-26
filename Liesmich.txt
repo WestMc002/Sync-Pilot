@@ -379,6 +379,17 @@ Administratorrechte
            *S-1-5-18:(OI)(CI)F *S-1-5-11:(OI)(CI)RX   (eine Zeile)
   Dasselbe gilt für Sync Pilot selbst bei Aufgaben "Als Administrator
   ausführen": am besten unter "Programme" installieren.
+  Vor jedem Lauf mit Administratorrechten prüft Sync Pilot außerdem die
+  Befehle vor und nach dem Kopieren und die Skripte, die sie aufrufen (.bat,
+  .cmd, .ps1): Eine weitere PowerShell muss mit -NoProfile vor dem Skript
+  starten (z. B. powershell -NoProfile -File x.ps1), eine weitere
+  Eingabeaufforderung mit /d vor /c (cmd /d /c ...). Sonst würden sie
+  Profilskripte bzw. den AutoRun-Eintrag laden, die jedes Programm ändern
+  kann. Was sich nicht eindeutig prüfen lässt (Shell-Aufruf über eine
+  Variable, Invoke-Expression, "for /f ... in ('...')", fehlerhaftes Skript),
+  läuft nicht mit Administratorrechten; der Hinweis nennt Skript und Zeile.
+  Grenze: Was Programme (.exe) oder vom Skript nachgeladene Dateien intern
+  starten, kann Sync Pilot so nicht prüfen.
 
 Aufgabe deaktivieren
   In der Aufgabe "Aufgabe aktiv" ausschalten oder per Rechtsklick auf die

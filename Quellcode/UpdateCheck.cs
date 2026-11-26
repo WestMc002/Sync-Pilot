@@ -264,7 +264,7 @@ namespace SyncPilot
             if (values["Programm"] != "Sync Pilot") { detail = "Das Manifest gehört zu „" + values["Programm"] + "“, nicht zu Sync Pilot."; return Invalid; }
             if (values["Version"] != version) { detail = "Das Manifest nennt Version " + values["Version"] + ", das Release " + version + "."; return Invalid; }
             if (values["Datei"] != AssetName(version)) { detail = "Das Manifest nennt die Datei „" + values["Datei"] + "“."; return Invalid; }
-            if (!Regex.IsMatch(values["SHA256"], "^[0-9a-f]{64}$")) { detail = "Die Prüfsumme im Manifest ist ungültig."; return Invalid; }
+            if (!IsLowerHex(values["SHA256"], 64)) { detail = "Die Prüfsumme im Manifest ist ungültig."; return Invalid; }
             sha = values["SHA256"].ToUpperInvariant();
             return null;
         }
@@ -421,10 +421,18 @@ namespace SyncPilot
             get { try { return Process.GetCurrentProcess().StartTime.ToUniversalTime().Ticks; } catch { return 0; } }
         }
 
+        /// <summary>Genau n Zeichen 0-9 und a-f (ohne Regex, Prüfung fremder Werte)?</summary>
+        static bool IsLowerHex(string s, int n)
+        {
+            if (s == null || s.Length != n) return false;
+            foreach (char c in s) if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+            return true;
+        }
+
         /// <summary>Gültige Versuchskennung (32 Hex-Zeichen, klein)?</summary>
         public static bool IsAttemptId(string id)
         {
-            return id != null && Regex.IsMatch(id, "^[0-9a-f]{32}$");
+            return IsLowerHex(id, 32);
         }
 
         static int busy;

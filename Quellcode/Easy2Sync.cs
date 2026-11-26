@@ -42,7 +42,9 @@ namespace SyncPilot
         public static bool SuggestGroup(string name, out string group, out string shortName)
         {
             group = shortName = null;
-            Match m = NamePattern.Match(name ?? "");
+            Match m;
+            try { m = NamePattern.Match(name ?? ""); }
+            catch (RegexMatchTimeoutException) { return false; } // nicht eindeutig: keine Gruppe vorschlagen
             if (!m.Success) return false;
             string x = m.Groups[1].Value.Trim(), y = m.Groups[2].Value.Trim(), n = m.Groups[3].Value.Trim();
             if (x.Length == 0 || y.Length == 0 || n.Length == 0) return false;

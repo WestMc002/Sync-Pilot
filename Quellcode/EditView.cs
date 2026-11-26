@@ -1604,9 +1604,15 @@ namespace SyncPilot
             else
             {
                 // Hinweis schon beim Speichern: Mit Administratorrechten laufen nur Skripte aus geschützten Ordnern
-                string unprotectedFile = JobSeal.Needed(j) ? JobSeal.UnprotectedScript(j) : null;
+                string unprotectedFile = null;
+                try { unprotectedFile = JobSeal.Needed(j) ? JobSeal.UnprotectedScript(j) : null; } catch (System.Text.RegularExpressions.RegexMatchTimeoutException) { }
                 if (unprotectedFile != null)
                     MessageBox.Show(JobSeal.UnprotectedMessage(unprotectedFile) + "\n\nBis dahin bricht die Aufgabe mit Administratorrechten mit diesem Hinweis ab.",
+                        "Sync Pilot", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                // ebenso die Skriptprüfung: weitere Shell-Aufrufe nur mit -NoProfile bzw. /d, Mehrdeutiges nicht mit Adminrechten
+                string scriptProblem = JobSeal.Needed(j) ? JobSeal.ScriptProblem(j) : null;
+                if (unprotectedFile == null && scriptProblem != null)
+                    MessageBox.Show("Mit Administratorrechten läuft diese Aufgabe nicht:\n\n" + scriptProblem + ".",
                         "Sync Pilot", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 string sealErr = JobSeal.Ensure(j);
                 if (sealErr != null)

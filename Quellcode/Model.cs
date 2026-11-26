@@ -637,6 +637,14 @@ namespace SyncPilot
         /// Exportierte Aufgaben lesen (ohne Kennwörter, ohne Verweis auf eine geplante Aufgabe und ohne bestätigte
         /// Server-Zertifikate). Die Datei kann von außen kommen: höchstens 16 MB und 5000 Aufgaben.
         /// </summary>
+        /// <summary>Kennung aus einer Sicherung: genau 32 Zeichen 0-9/a-f (ohne Regex, fremde Daten).</summary>
+        static bool IsHexId(string s)
+        {
+            if (s == null || s.Length != 32) return false;
+            foreach (char c in s) if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+            return true;
+        }
+
         public static List<SyncJob> ReadExport(string file)
         {
             if (new FileInfo(file).Length > 16L * 1024 * 1024) throw new InvalidDataException("Die Datei ist zu groß.");
@@ -653,7 +661,7 @@ namespace SyncPilot
             }
             foreach (SyncJob j in list)
             {
-                if (j.Id != null && !System.Text.RegularExpressions.Regex.IsMatch(j.Id, "^[0-9a-f]{32}$")) j.Id = null;
+                if (j.Id != null && !IsHexId(j.Id)) j.Id = null;
                 // Namen ohne Zeilenumbrüche und Steuerzeichen (erscheinen in Protokollzeilen und Aufgabennamen)
                 j.Name = NoControl(j.Name);
                 j.Group = NoControl(j.Group);

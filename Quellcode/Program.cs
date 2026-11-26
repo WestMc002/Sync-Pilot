@@ -36,6 +36,10 @@ namespace SyncPilot
         [STAThread]
         static int Main(string[] args)
         {
+            // Regex-Prüfungen fremder Daten (Globale Richtlinien, 25.11.2026): Jeder Abgleich ohne eigenes Zeitlimit bekommt
+            // 250 ms. Muss vor der ersten Verwendung von Regex gesetzt werden. Eine Zeitüberschreitung gilt als „nicht
+            // eindeutig prüfbar“ und führt an den Prüfstellen zur Ablehnung (RegexMatchTimeoutException).
+            AppDomain.CurrentDomain.SetData("REGEX_DEFAULT_MATCH_TIMEOUT", TimeSpan.FromMilliseconds(250));
             // vor jedem Dateizugriff: Pfade über 260 Zeichen erlauben (siehe LongPath)
             LongPath.Enable();
             Application.EnableVisualStyles();

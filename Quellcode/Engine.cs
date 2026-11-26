@@ -205,7 +205,11 @@ namespace SyncPilot
         static bool Match(List<Rule> rules, string rel, string name)
         {
             foreach (Rule r in rules)
-                if (r.Rx.IsMatch(r.FullPath ? rel : name)) return true;
+            {
+                // Zeitlimit (Programmstart: 250 ms): nicht eindeutig prüfbar = diese Datei nicht bearbeiten, Fehler melden
+                try { if (r.Rx.IsMatch(r.FullPath ? rel : name)) return true; }
+                catch (RegexMatchTimeoutException) { throw new SyncException("Filter nicht eindeutig prüfbar (Zeitlimit überschritten): " + rel); }
+            }
             return false;
         }
 
