@@ -959,6 +959,7 @@ namespace SyncPilot
             {
                 for (; i < lines.Length && lines[i].StartsWith("Geplant ", StringComparison.Ordinal); i++)
                 {
+                    if (lines[i].Length > 4096) return false;
                     Match g = Regex.Match(lines[i], @"^Geplant (\d+): Ziel: (.+)$");
                     if (!g.Success || g.Groups[1].Value != (planned.Count + 1).ToString(System.Globalization.CultureInfo.InvariantCulture) || !allowed(g.Groups[2].Value)) return false;
                     string p = g.Groups[2].Value;
@@ -976,6 +977,7 @@ namespace SyncPilot
             for (; i < lines.Length; i++)
             {
                 string line = lines[i];
+                if (line.Length > 4096) return false; // so lang wird keine gültige Zeile; begrenzt zugleich die Laufzeit der Muster
                 Match e = Regex.Match(line, @"^Ersetzt (\d+)$");
                 if (e.Success)
                 {
@@ -1748,6 +1750,14 @@ try {
   $plan = @()
   $k = 0
   foreach ($p in $pairs) { $k++; $plan += ('Geplant ' + $k + ': Ziel: ' + $p[1]) }
+  # Jede Journalzeile hoechstens 4096 Zeichen (laengere liest die Wiederherstellung nicht): bei zu langem Programmpfad
+  # abbrechen, bevor etwas geschrieben oder veraendert wird
+  $k = 0
+  foreach ($p in $pairs) {
+    $k++
+    $len = ('Vorher ' + $k + ': Sicherung | Ziel: ' + $p[1] + ' | Sicherungsdatei: ' + (Join-Path $alt ([string]$k)) + ' | SHA256: ' + ('0' * 64) + ' | Hilfsdatei: ' + (Join-Path (Split-Path $p[1] -Parent) ('.' + (Split-Path $p[1] -Leaf) + '.update-' + ('0' * 32)))).Length
+    if ($len -gt 4096) { throw 'Der Programmpfad ist zu lang fuer das Wiederherstellungsjournal.' }
+  }
   $journalHead = @((('Sync Pilot ' + $Version + ' - Wiederherstellungsjournal'), 'Journalformat 2',
     'Jede Zeile ""Vorher"" gilt als moeglicherweise ueberschrieben, auch ohne folgende Zeile ""Ersetzt"" (Abbruch waehrend des Kopierens).',
     'Wiederherstellen fuer jede Zeile ""Vorher"": bei ""Sicherung"" die Sicherungsdatei auf das Ziel zurueckkopieren (sie ist vollstaendig), bei ""Neu"" die Zieldatei loeschen, falls vorhanden.',
@@ -2066,6 +2076,7 @@ try {
   while ($i -lt $lines.Count -and -not $lines[$i].StartsWith($first)) { if ($lines[$i] -cmatch $keywords) { throw 'Das Journal ist nicht lesbar.' }; $i++ }
   if ($format2) {
     while ($i -lt $lines.Count -and $lines[$i].StartsWith('Geplant ')) {
+      if ($lines[$i].Length -gt 4096) { throw 'Das Journal ist nicht lesbar.' }
       if ($lines[$i] -cnotmatch '^Geplant (\d+): Ziel: (.+)$') { throw 'Das Journal ist nicht lesbar.' }
       if ($Matches[1] -ne [string]($planned.Count + 1) -or $allowed -notcontains $Matches[2] -or $planned -contains $Matches[2]) { throw 'Unerwarteter Eintrag im Journal.' }
       $planned += $Matches[2]
@@ -2080,6 +2091,8 @@ try {
   $replacedLast = $true
     for (; $i -lt $lines.Count; $i++) {
       $line = $lines[$i]
+      # so lang wird keine gueltige Zeile; begrenzt zugleich die Laufzeit der Muster unten
+      if ($line.Length -gt 4096) { throw 'Das Journal ist nicht lesbar.' }
       if ($line -cmatch '^Ersetzt (\d+)$') {
         if ($entries.Count -eq 0 -or $replacedLast -or $Matches[1] -ne $entries[$entries.Count - 1].N) { throw 'Das Journal ist nicht lesbar.' }
         $replacedLast = $true
